@@ -27,12 +27,13 @@ import yfinance as yf
 
 from .cache import cache
 from .config import settings
-from .db import insert_snapshots, upsert_ohlcv, insert_news, insert_history, log_ingestion
+from .db import insert_history, insert_news, insert_snapshots, log_ingestion, upsert_ohlcv
 
 log = logging.getLogger("flux.ingestion")
 
 # ── Shared HTTP client ────────────────────────────────────────────────────────
 _client: httpx.AsyncClient | None = None
+
 
 def _http() -> httpx.AsyncClient:
     global _client
@@ -48,7 +49,7 @@ async def close_client() -> None:
 
 
 # ── Status tracking ───────────────────────────────────────────────────────────
-_status: dict[str, Any] = {}   # job → {ts, rows, status}
+_status: dict[str, Any] = {}  # job → {ts, rows, status}
 
 
 def get_status() -> dict:
@@ -61,27 +62,39 @@ def _record(job: str, rows: int, status: str = "ok", msg: str = "") -> None:
 
 # ── Asset catalogues (mirrors main.py) ───────────────────────────────────────
 CRYPTO_IDS = [
-    "bitcoin", "ethereum", "tether", "binancecoin", "solana",
-    "ripple", "dogecoin", "cardano", "avalanche-2", "polkadot",
-    "chainlink", "uniswap", "litecoin", "shiba-inu", "tron",
+    "bitcoin",
+    "ethereum",
+    "tether",
+    "binancecoin",
+    "solana",
+    "ripple",
+    "dogecoin",
+    "cardano",
+    "avalanche-2",
+    "polkadot",
+    "chainlink",
+    "uniswap",
+    "litecoin",
+    "shiba-inu",
+    "tron",
 ]
 
 STOCK_META: dict[str, tuple[str, str]] = {
-    "AAPL":  ("Apple Inc.",          "Technology"),
-    "MSFT":  ("Microsoft Corp.",      "Technology"),
-    "NVDA":  ("NVIDIA Corp.",         "Semiconductors"),
-    "GOOGL": ("Alphabet Inc.",        "Technology"),
-    "AMZN":  ("Amazon.com Inc.",      "Consumer"),
-    "TSLA":  ("Tesla Inc.",           "Automotive"),
-    "META":  ("Meta Platforms",       "Technology"),
-    "NFLX":  ("Netflix Inc.",         "Media"),
-    "JPM":   ("JPMorgan Chase",       "Financials"),
-    "AMD":   ("Advanced Micro Dev.",  "Semiconductors"),
-    "TSM":   ("Taiwan Semiconductor", "Semiconductors"),
-    "ORCL":  ("Oracle Corp.",         "Technology"),
-    "CRM":   ("Salesforce Inc.",      "Software"),
-    "INTC":  ("Intel Corp.",          "Semiconductors"),
-    "BABA":  ("Alibaba Group",        "Consumer"),
+    "AAPL": ("Apple Inc.", "Technology"),
+    "MSFT": ("Microsoft Corp.", "Technology"),
+    "NVDA": ("NVIDIA Corp.", "Semiconductors"),
+    "GOOGL": ("Alphabet Inc.", "Technology"),
+    "AMZN": ("Amazon.com Inc.", "Consumer"),
+    "TSLA": ("Tesla Inc.", "Automotive"),
+    "META": ("Meta Platforms", "Technology"),
+    "NFLX": ("Netflix Inc.", "Media"),
+    "JPM": ("JPMorgan Chase", "Financials"),
+    "AMD": ("Advanced Micro Dev.", "Semiconductors"),
+    "TSM": ("Taiwan Semiconductor", "Semiconductors"),
+    "ORCL": ("Oracle Corp.", "Technology"),
+    "CRM": ("Salesforce Inc.", "Software"),
+    "INTC": ("Intel Corp.", "Semiconductors"),
+    "BABA": ("Alibaba Group", "Consumer"),
 }
 STOCK_SYMBOLS = list(STOCK_META.keys())
 _FMP = "https://financialmodelingprep.com/image-stock"
@@ -91,40 +104,35 @@ OHLCV_SYMBOLS: dict[str, str] = {
     "BTC-USD": "BTC",
     "ETH-USD": "ETH",
     "SOL-USD": "SOL",
-    "^NSEI":   "NIFTY",
-    "AAPL":    "AAPL",
-    "NVDA":    "NVDA",
-    "TSLA":    "TSLA",
-    "MSFT":    "MSFT",
+    "AAPL": "AAPL",
+    "NVDA": "NVDA",
+    "TSLA": "TSLA",
+    "MSFT": "MSFT",
 }
 
 # ── Training-data universe for ohlcv_history ─────────────────────────────────
 # yfinance ticker → (DB label, is_crypto). Mirrors scripts/backfill_history.py's
-# UNIVERSE — the 15 stocks above, 15 crypto, 3 macro series (SPX/VIX/TNX), plus
-# NIFTY. NIFTY isn't in model_meta's 29-symbol training set, but giving it real
-# ohlcv_history rows lets /predict/NIFTY run the same generic model so the advisor
-# page's NIFTY tab gets a real forecast instead of "no coverage".
+# UNIVERSE — the 15 stocks above, 15 crypto and 3 macro series (SPX/VIX/TNX).
 HISTORY_UNIVERSE: dict[str, tuple[str, bool]] = {
     **{sym: (sym, False) for sym in STOCK_SYMBOLS},
-    "BTC-USD":     ("BTC",  True),
-    "ETH-USD":     ("ETH",  True),
-    "USDT-USD":    ("USDT", True),
-    "BNB-USD":     ("BNB",  True),
-    "SOL-USD":     ("SOL",  True),
-    "XRP-USD":     ("XRP",  True),
-    "DOGE-USD":    ("DOGE", True),
-    "ADA-USD":     ("ADA",  True),
-    "AVAX-USD":    ("AVAX", True),
-    "DOT-USD":     ("DOT",  True),
-    "LINK-USD":    ("LINK", True),
-    "UNI7083-USD": ("UNI",  True),   # plain UNI-USD is delisted on yfinance
-    "LTC-USD":     ("LTC",  True),
-    "SHIB-USD":    ("SHIB", True),
-    "TRX-USD":     ("TRX",  True),
-    "^GSPC":  ("SPX",   False),
-    "^VIX":   ("VIX",   False),
-    "^TNX":   ("TNX",   False),
-    "^NSEI":  ("NIFTY", False),
+    "BTC-USD": ("BTC", True),
+    "ETH-USD": ("ETH", True),
+    "USDT-USD": ("USDT", True),
+    "BNB-USD": ("BNB", True),
+    "SOL-USD": ("SOL", True),
+    "XRP-USD": ("XRP", True),
+    "DOGE-USD": ("DOGE", True),
+    "ADA-USD": ("ADA", True),
+    "AVAX-USD": ("AVAX", True),
+    "DOT-USD": ("DOT", True),
+    "LINK-USD": ("LINK", True),
+    "UNI7083-USD": ("UNI", True),  # plain UNI-USD is delisted on yfinance
+    "LTC-USD": ("LTC", True),
+    "SHIB-USD": ("SHIB", True),
+    "TRX-USD": ("TRX", True),
+    "^GSPC": ("SPX", False),
+    "^VIX": ("VIX", False),
+    "^TNX": ("TNX", False),
 }
 
 _FINANCE_DOMAINS = (
@@ -133,8 +141,8 @@ _FINANCE_DOMAINS = (
     "cryptonews.com,decrypt.co,theblock.co"
 )
 _GENERAL_QUERY = (
-    "bitcoin OR ethereum OR cryptocurrency OR \"stock market\" OR "
-    "\"Federal Reserve\" OR \"interest rate\" OR \"S&P 500\""
+    'bitcoin OR ethereum OR cryptocurrency OR "stock market" OR '
+    '"Federal Reserve" OR "interest rate" OR "S&P 500"'
 )
 
 
@@ -157,7 +165,8 @@ async def ingest_crypto() -> list[dict]:
     try:
         r = await _http().get(
             "https://api.coingecko.com/api/v3/coins/markets",
-            params=params, headers=headers,
+            params=params,
+            headers=headers,
         )
         r.raise_for_status()
         coins = r.json()
@@ -170,32 +179,36 @@ async def ingest_crypto() -> list[dict]:
     assets, rows = [], []
     for coin in coins:
         sym = (coin.get("symbol") or "").upper()
-        price  = float(coin.get("current_price") or 0)
+        price = float(coin.get("current_price") or 0)
         change = float(coin.get("price_change_percentage_24h") or 0)
-        mcap   = float(coin.get("market_cap") or 0)
-        vol    = float(coin.get("total_volume") or 0)
+        mcap = float(coin.get("market_cap") or 0)
+        vol = float(coin.get("total_volume") or 0)
 
-        assets.append({
-            "symbol":       f"BINANCE:{sym}USDT",
-            "name":         coin.get("name", sym),
-            "sub":          sym,
-            "price":        price,
-            "change_pct":   change,
-            "market_cap":   mcap,
-            "icon":         coin.get("image", ""),
-            "sector":       "",
-            "sparkline_7d": (coin.get("sparkline_in_7d") or {}).get("price", []),
-        })
-        rows.append({
-            "symbol":     sym,
-            "asset_type": "crypto",
-            "name":       coin.get("name", sym),
-            "price":      price,
-            "change_pct": change,
-            "volume":     vol,
-            "market_cap": mcap,
-            "ts":         ts,
-        })
+        assets.append(
+            {
+                "symbol": f"BINANCE:{sym}USDT",
+                "name": coin.get("name", sym),
+                "sub": sym,
+                "price": price,
+                "change_pct": change,
+                "market_cap": mcap,
+                "icon": coin.get("image", ""),
+                "sector": "",
+                "sparkline_7d": (coin.get("sparkline_in_7d") or {}).get("price", []),
+            }
+        )
+        rows.append(
+            {
+                "symbol": sym,
+                "asset_type": "crypto",
+                "name": coin.get("name", sym),
+                "price": price,
+                "change_pct": change,
+                "volume": vol,
+                "market_cap": mcap,
+                "ts": ts,
+            }
+        )
 
     # Update in-memory cache so live endpoints stay fresh
     cache.set("crypto", assets, ttl=settings.CRYPTO_TTL)
@@ -220,11 +233,17 @@ async def _fetch_one_stock(sym: str) -> dict | None:
         if price == 0:
             return None
         prev = float(q.get("pc") or price)
-        chg  = ((price - prev) / prev * 100) if prev else 0
-        vol  = float(q.get("v") or 0)
+        chg = ((price - prev) / prev * 100) if prev else 0
+        vol = float(q.get("v") or 0)
         name, sector = STOCK_META.get(sym, (sym, ""))
-        return {"sym": sym, "name": name, "sector": sector,
-                "price": price, "chg": round(chg, 3), "vol": vol}
+        return {
+            "sym": sym,
+            "name": name,
+            "sector": sector,
+            "price": price,
+            "chg": round(chg, 3),
+            "vol": vol,
+        }
     except Exception as exc:
         log.debug("Finnhub %s: %s", sym, exc)
         return None
@@ -239,26 +258,30 @@ async def ingest_stocks() -> list[dict]:
     for r in results:
         if r is None:
             continue
-        assets.append({
-            "symbol":     r["sym"],
-            "name":       r["name"],
-            "sub":        r["sym"],
-            "price":      r["price"],
-            "change_pct": r["chg"],
-            "market_cap": 0,
-            "icon":       f"{_FMP}/{r['sym']}.png",
-            "sector":     r["sector"],
-        })
-        rows.append({
-            "symbol":     r["sym"],
-            "asset_type": "stock",
-            "name":       r["name"],
-            "price":      r["price"],
-            "change_pct": r["chg"],
-            "volume":     r["vol"],
-            "market_cap": 0,
-            "ts":         ts,
-        })
+        assets.append(
+            {
+                "symbol": r["sym"],
+                "name": r["name"],
+                "sub": r["sym"],
+                "price": r["price"],
+                "change_pct": r["chg"],
+                "market_cap": 0,
+                "icon": f"{_FMP}/{r['sym']}.png",
+                "sector": r["sector"],
+            }
+        )
+        rows.append(
+            {
+                "symbol": r["sym"],
+                "asset_type": "stock",
+                "name": r["name"],
+                "price": r["price"],
+                "change_pct": r["chg"],
+                "volume": r["vol"],
+                "market_cap": 0,
+                "ts": ts,
+            }
+        )
 
     if assets:
         cache.set("stocks", assets, ttl=settings.STOCKS_TTL)
@@ -279,15 +302,17 @@ def _fetch_ohlcv_sync() -> list[dict]:
             if df.empty:
                 continue
             for ts, row in df.iterrows():
-                rows.append({
-                    "symbol": label,
-                    "date":   str(ts.date()),
-                    "open":   round(float(row["Open"]),  4),
-                    "high":   round(float(row["High"]),  4),
-                    "low":    round(float(row["Low"]),   4),
-                    "close":  round(float(row["Close"]), 4),
-                    "volume": int(row.get("Volume", 0) or 0),
-                })
+                rows.append(
+                    {
+                        "symbol": label,
+                        "date": str(ts.date()),
+                        "open": round(float(row["Open"]), 4),
+                        "high": round(float(row["High"]), 4),
+                        "low": round(float(row["Low"]), 4),
+                        "close": round(float(row["Close"]), 4),
+                        "volume": int(row.get("Volume", 0) or 0),
+                    }
+                )
         except Exception as exc:
             log.warning("yfinance %s: %s", yf_sym, exc)
     return rows
@@ -313,10 +338,12 @@ def _clean_price(x) -> float | None:
     v = float(x)
     if math.isnan(v):
         return None
-    return float(f"{v:.10g}")   # 10 sig figs preserves SHIB-scale prices
+    return float(f"{v:.10g}")  # 10 sig figs preserves SHIB-scale prices
 
 
-def _fetch_history_sync(period: str = "1mo", universe: dict[str, tuple[str, bool]] | None = None) -> list[dict]:
+def _fetch_history_sync(
+    period: str = "1mo", universe: dict[str, tuple[str, bool]] | None = None
+) -> list[dict]:
     """Pull a recent OHLCV window for the training universe and shape it for
     insert_history. Mirrors scripts/backfill_history.fetch_symbol but with a
     bounded lookback by default — insert_history upserts on (symbol, date) so
@@ -334,16 +361,18 @@ def _fetch_history_sync(period: str = "1mo", universe: dict[str, tuple[str, bool
                 if close is None or close <= 0:
                     continue
                 adj = close if is_crypto else (_clean_price(row["Adj Close"]) if has_adj else close)
-                rows.append({
-                    "symbol":    label,
-                    "date":      str(ts.date()),
-                    "open":      _clean_price(row["Open"]),
-                    "high":      _clean_price(row["High"]),
-                    "low":       _clean_price(row["Low"]),
-                    "close":     close,
-                    "adj_close": adj if adj is not None else close,
-                    "volume":    int(row.get("Volume", 0) or 0),
-                })
+                rows.append(
+                    {
+                        "symbol": label,
+                        "date": str(ts.date()),
+                        "open": _clean_price(row["Open"]),
+                        "high": _clean_price(row["High"]),
+                        "low": _clean_price(row["Low"]),
+                        "close": close,
+                        "adj_close": adj if adj is not None else close,
+                        "volume": int(row.get("Volume", 0) or 0),
+                    }
+                )
         except Exception as exc:
             log.warning("ohlcv_history fetch %s: %s", yf_ticker, exc)
     return rows
@@ -351,7 +380,7 @@ def _fetch_history_sync(period: str = "1mo", universe: dict[str, tuple[str, bool
 
 async def ingest_history_daily() -> None:
     """Append the latest daily bar(s) to ohlcv_history for the training universe
-    (29 model symbols + macro context + NIFTY), so predictions anchor on a fresh
+    (29 model symbols + macro context), so predictions anchor on a fresh
     close and resolve_due() can mature outcomes."""
     loop = asyncio.get_event_loop()
     try:
@@ -375,12 +404,12 @@ async def ingest_news() -> list[dict]:
         r = await _http().get(
             "https://newsapi.org/v2/everything",
             params={
-                "q":        _GENERAL_QUERY,
+                "q": _GENERAL_QUERY,
                 "language": "en",
-                "sortBy":   "publishedAt",
+                "sortBy": "publishedAt",
                 "pageSize": 20,
-                "apiKey":   settings.NEWSAPI_KEY,
-                "domains":  _FINANCE_DOMAINS,
+                "apiKey": settings.NEWSAPI_KEY,
+                "domains": _FINANCE_DOMAINS,
             },
         )
         r.raise_for_status()
@@ -393,16 +422,16 @@ async def ingest_news() -> list[dict]:
     articles, rows = [], []
     for a in articles_raw:
         title = (a.get("title") or "").strip()
-        url   = a.get("url") or ""
+        url = a.get("url") or ""
         if not title or title == "[Removed]" or not url:
             continue
         art = {
-            "title":        title,
-            "source":       a.get("source", {}).get("name", ""),
-            "url":          url,
-            "summary":      (a.get("description") or "")[:200].strip(),
+            "title": title,
+            "source": a.get("source", {}).get("name", ""),
+            "url": url,
+            "summary": (a.get("description") or "")[:200].strip(),
             "published_at": a.get("publishedAt", ""),
-            "cached_at":    ts,
+            "cached_at": ts,
         }
         articles.append(art)
         rows.append(art)
@@ -437,16 +466,17 @@ def build_scheduler(insight_job_fn=None):
     Every interval comes from settings; nothing here is hardcoded any more.
     """
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.interval import IntervalTrigger
     from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.date import DateTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
 
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    market_min  = max(1, settings.INGESTION_INTERVAL_MIN)
-    ohlcv_min   = max(market_min, settings.OHLCV_INTERVAL_MIN)
-    news_min    = max(market_min, settings.NEWS_INTERVAL_MIN)
+    market_min = max(1, settings.INGESTION_INTERVAL_MIN)
+    ohlcv_min = max(market_min, settings.OHLCV_INTERVAL_MIN)
+    news_min = max(market_min, settings.NEWS_INTERVAL_MIN)
     insight_min = max(market_min, settings.INSIGHT_INTERVAL_MIN)
-    heavy_boot  = settings.HEAVY_JOBS_ON_STARTUP
+    heavy_boot = settings.HEAVY_JOBS_ON_STARTUP
 
     def _boot_run(minutes: int) -> dict:
         """Kwargs for a one-off run shortly after startup, or nothing at all.
@@ -478,7 +508,7 @@ def build_scheduler(insight_job_fn=None):
         _last_insight[0] = now
         try:
             await insight_job_fn()
-        except Exception as exc:              # never let insights kill ingestion
+        except Exception as exc:  # never let insights kill ingestion
             log.warning("insight cycle failed: %s", exc)
         return res
 
@@ -515,14 +545,50 @@ def build_scheduler(insight_job_fn=None):
         max_instances=1,
     )
 
-    # 4) Prune old snapshots daily at midnight UTC
-    from .db import prune_old_snapshots
+    # 4) Prune old snapshots and ingestion_log rows daily at midnight UTC
+    from .db import prune_ingestion_log, prune_old_snapshots
+
+    async def prune_job():
+        await prune_old_snapshots(settings.SNAPSHOT_RETENTION_DAYS)
+        await prune_ingestion_log(settings.INGESTION_LOG_RETENTION_DAYS)
+
     scheduler.add_job(
-        prune_old_snapshots,
+        prune_job,
         trigger=CronTrigger(hour=0, minute=0, timezone="UTC"),
         id="prune",
         coalesce=True,
     )
+
+    # 4b) Demo user reseed — daily at 00:05 UTC (before the 00:10 / 00:30 jobs),
+    #     plus a self-heal ~4 min after boot, once the OHLCV job (+2 min) has
+    #     stored the closes its paper trades are priced from. Light work: a
+    #     thousand small inserts, no pandas, no network.
+    if settings.DEMO_RESEED:
+
+        async def demo_reseed_job(force: bool = True):
+            from .demo_seed import ensure_demo_fresh, seed_demo_user
+
+            loop = asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(None, seed_demo_user if force else ensure_demo_fresh)
+            except Exception as exc:  # never let it crash the scheduler
+                log.warning("demo reseed failed: %s", exc)
+
+        scheduler.add_job(
+            demo_reseed_job,
+            trigger=CronTrigger(hour=0, minute=5, timezone="UTC"),
+            id="demo_reseed",
+            misfire_grace_time=600,
+            coalesce=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            demo_reseed_job,
+            trigger=DateTrigger(run_date=datetime.utcnow() + timedelta(minutes=4), timezone="UTC"),
+            kwargs={"force": False},
+            id="demo_reseed_boot",
+            misfire_grace_time=600,
+        )
 
     # 5) ohlcv_history daily append — daily at 00:10 UTC, before options_iv
     #    (00:20) and the prediction cycle (00:30) so they read fresh closes.
@@ -550,15 +616,19 @@ def build_scheduler(insight_job_fn=None):
     #    loop, because each restart schedules it again. The cron trigger is
     #    unaffected and POST /ingestion/trigger/predictions runs it on demand.
     from pathlib import Path as _Path
+
     if (_Path(__file__).parent / "prediction" / "models" / "xgb_primary.json").exists():
+
         async def prediction_job():
             from .prediction.flux_x import run_flux_x
+
             try:
-                res = await run_flux_x()                   # dry-run paper by default (no live orders)
+                res = await run_flux_x()  # dry-run paper by default (no live orders)
                 await log_ingestion("predictions", "ok", res.get("logged", 0), str(res))
-            except Exception as exc:                       # never let it crash the scheduler
+            except Exception as exc:  # never let it crash the scheduler
                 log.warning("prediction cycle failed: %s", exc)
                 await log_ingestion("predictions", "error", 0, str(exc))
+
         scheduler.add_job(
             prediction_job,
             trigger=CronTrigger(hour=0, minute=30, timezone="UTC"),
@@ -573,14 +643,19 @@ def build_scheduler(insight_job_fn=None):
         #    ECE has drifted past threshold (and the model isn't too fresh); otherwise a no-op.
         async def drift_job():
             from .prediction.drift import maybe_retrain
+
             try:
                 res = await maybe_retrain()
-                await log_ingestion("drift_retrain",
-                                    "ok" if res.get("retrained") else "skip",
-                                    0, res.get("reason", ""))
+                await log_ingestion(
+                    "drift_retrain",
+                    "ok" if res.get("retrained") else "skip",
+                    0,
+                    res.get("reason", ""),
+                )
             except Exception as exc:
                 log.warning("drift retrain failed: %s", exc)
                 await log_ingestion("drift_retrain", "error", 0, str(exc))
+
         scheduler.add_job(
             drift_job,
             trigger=CronTrigger(day_of_week="sun", hour=2, minute=0, timezone="UTC"),
@@ -595,12 +670,14 @@ def build_scheduler(insight_job_fn=None):
         #    options_iv flywheel that a future training feature can be validated against.
         async def options_iv_job():
             from .prediction.options import snapshot_iv
+
             try:
                 n = await snapshot_iv(STOCK_SYMBOLS)
                 await log_ingestion("options_iv", "ok", n, f"{n} symbols snapshotted")
             except Exception as exc:
                 log.warning("options IV snapshot failed: %s", exc)
                 await log_ingestion("options_iv", "error", 0, str(exc))
+
         scheduler.add_job(
             options_iv_job,
             trigger=CronTrigger(hour=0, minute=20, timezone="UTC"),

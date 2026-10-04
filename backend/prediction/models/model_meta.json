@@ -90,7 +90,7 @@
   ],
   "fd_orders": {
     "AAPL": 0.1,
-    "ADA": 0.3,
+    "ADA": 0.4,
     "AMD": 0.1,
     "AMZN": 0.2,
     "AVAX": 0.3,
@@ -126,69 +126,81 @@
   "embargo": 7,
   "metrics": {
     "leak_overlaps": 0,
-    "n_oof": 118278,
-    "model_acc": 0.5263954412485838,
-    "model_auc": 0.5158404547146022,
-    "model_f1": 0.6250460183270079,
+    "n_oof": 133753,
+    "model_acc": 0.52764423975537,
+    "model_auc": 0.5216850742115494,
+    "model_f1": 0.6217120822929951,
     "confusion": [
       [
-        15571,
-        39674
+        18657,
+        44052
       ],
       [
-        16343,
-        46690
+        19127,
+        51917
       ]
     ],
-    "persistence_acc": 0.49578958047988636,
-    "always_up_acc": 0.5329224369705271,
-    "majority_acc": 0.5329224369705271,
-    "ece_raw": 0.029821135086568706,
-    "ece_cal": 4.4251508447400248e-16,
-    "arima_acc": 0.5702270815811606,
-    "arima_drift": 0.5306980656013457,
-    "arima_edge": 0.03952901597981495
+    "persistence_acc": 0.4960038279515226,
+    "always_up_acc": 0.5311581796296158,
+    "majority_acc": 0.5311581796296158,
+    "ece_raw": 0.0307462675377297,
+    "ece_cal": 0.0224785219018499,
+    "ece_cal_n": 111461,
+    "ece_cal_insample": 3.2950057749191696e-16,
+    "arima_acc": 0.5306980656013457,
+    "arima_drift": 0.5441547518923465,
+    "arima_edge": -0.01345668629100083,
+    "arima_n": 1189,
+    "arima_note": "sampled ARIMA(1,0,0): sign of the raw close-to-close 5-day return on its own sample since 2008, not the triple-barrier label or rows the model is scored on; compare arima_edge (vs drift on the same sample), not arima_acc vs model_acc"
   },
   "meta_report": {
-    "meta_auc": 0.5167205794019099,
-    "act_all_precision": 0.5342171194097571,
+    "meta_auc": 0.5053899012356919,
+    "act_all_precision": 0.5346877682178819,
     "buckets": [
       {
         "thr": 0.5,
-        "coverage": 0.7509025270758123,
-        "precision": 0.538553488860866
+        "coverage": 0.6713559002700497,
+        "precision": 0.5378391019644527
       },
       {
         "thr": 0.55,
-        "coverage": 0.44269199660689273,
-        "precision": 0.5499431830841559
+        "coverage": 0.35462329125583536,
+        "precision": 0.5394037780401417
       },
       {
         "thr": 0.6,
-        "coverage": 0.18103805409244245,
-        "precision": 0.5590606952163016
+        "coverage": 0.1280014235173439,
+        "precision": 0.5436258075067463
       }
-    ]
+    ],
+    "primary_calibration": "out-of-sample (isotonic fit on earlier folds only)"
   },
   "conformal_report": {
-    "n_calib": 118278,
-    "mae": 0.05006933576254978,
-    "mae_predict_zero": 0.04972565207467827,
+    "n_calib": 133753,
+    "mae": 0.05405166879454631,
+    "mae_predict_zero": 0.053486195068779344,
     "half_width_sigma": {
-      "0.2": 1.0803372083051002,
-      "0.1": 1.3572268667612364
+      "0.2": 1.089986627307013,
+      "0.1": 1.3703931655374197
     },
     "coverage": {
-      "0.2": 0.8000219821099444,
-      "0.1": 0.9000236730414786
+      "0.2": 0.8000194388163256,
+      "0.1": 0.9000171958759804
     }
   },
   "conformal_alphas": [
     0.2,
     0.1
   ],
-  "trained_at": 1780790172325,
-  "n_events": 137991,
+  "trained_at": 1791122468105,
+  "n_events": 156045,
+  "data_end": "2026-10-03",
+  "versions": {
+    "scikit-learn": "1.7.2",
+    "xgboost": "3.2.0",
+    "numpy": "2.2.6",
+    "pandas": "2.3.3"
+  },
   "gate0_baseline": {
     "note": "Locked price-only baseline FLUX-X must beat (FRED OFF = Phase 0). Deployable config = long-only edge-ranked top-decile + regime gate.",
     "oof_auc": 0.5158404547146022,

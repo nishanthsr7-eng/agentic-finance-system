@@ -31,9 +31,9 @@ from ..config import settings
 
 log = logging.getLogger("flux.prediction.paper")
 
-_PAPER_BASE = "https://paper-api.alpaca.markets"      # hard-pinned: paper only, never live
+_PAPER_BASE = "https://paper-api.alpaca.markets"  # hard-pinned: paper only, never live
 _SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
-MAX_NOTIONAL = 10_000.0                               # per-order clamp (paper safety rail)
+MAX_NOTIONAL = 10_000.0  # per-order clamp (paper safety rail)
 DEFAULT_EQUITY = 100_000.0
 
 
@@ -42,8 +42,10 @@ def _enabled() -> bool:
 
 
 def _headers() -> dict:
-    return {"APCA-API-KEY-ID": settings.ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY}
+    return {
+        "APCA-API-KEY-ID": settings.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
+    }
 
 
 async def account() -> dict | None:
@@ -55,8 +57,11 @@ async def account() -> dict | None:
             r = await cli.get("/v2/account", headers=_headers())
             r.raise_for_status()
             a = r.json()
-        return {"equity": float(a.get("equity", 0)), "buying_power": float(a.get("buying_power", 0)),
-                "status": a.get("status")}
+        return {
+            "equity": float(a.get("equity", 0)),
+            "buying_power": float(a.get("buying_power", 0)),
+            "status": a.get("status"),
+        }
     except Exception as exc:
         log.warning("Alpaca account fetch failed: %s", exc)
         return None
@@ -77,14 +82,21 @@ def _plan_orders(preds: list[dict], equity: float) -> list[dict]:
         notional = round(min(MAX_NOTIONAL, equity * kelly), 2)
         if notional < 1:
             continue
-        orders.append({"symbol": sym,
-                       "side": "buy" if p.get("direction") == "UP" else "sell",
-                       "notional": notional, "type": "market", "time_in_force": "day"})
+        orders.append(
+            {
+                "symbol": sym,
+                "side": "buy" if p.get("direction") == "UP" else "sell",
+                "notional": notional,
+                "type": "market",
+                "time_in_force": "day",
+            }
+        )
     return orders
 
 
-async def submit_orders(preds: list[dict], equity: float | None = None,
-                        live_submit: bool = False) -> dict:
+async def submit_orders(
+    preds: list[dict], equity: float | None = None, live_submit: bool = False
+) -> dict:
     """
     Plan paper orders from predictions; submit them only if live_submit=True. Returns a summary
     including the planned orders (so it's useful as a dry-run preview).

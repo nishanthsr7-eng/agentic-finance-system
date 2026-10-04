@@ -51,9 +51,9 @@ async def build_observations() -> pd.DataFrame:
     spx, vix = await _close("SPX"), await _close("VIX")
     lp = np.log(spx)
     obs = pd.DataFrame(index=spx.index)
-    obs["spx_ret20"] = lp.diff(20)                                  # trend
-    obs["spx_rvol20"] = lp.diff().rolling(20).std()                # turbulence
-    obs["vix"] = vix.reindex(spx.index).ffill()                    # fear level
+    obs["spx_ret20"] = lp.diff(20)  # trend
+    obs["spx_rvol20"] = lp.diff().rolling(20).std()  # turbulence
+    obs["vix"] = vix.reindex(spx.index).ffill()  # fear level
     return obs.dropna()
 
 
@@ -62,14 +62,14 @@ def _forward_filter(model, X: np.ndarray) -> np.ndarray:
     """Filtered posteriors P(state_t | obs_1..t) — uses only data up to t (no look-ahead)."""
     log_pi = np.log(model.startprob_ + 1e-12)
     log_A = np.log(model.transmat_ + 1e-12)
-    B = model._compute_log_likelihood(X)                            # (T, K) emission log-lik
+    B = model._compute_log_likelihood(X)  # (T, K) emission log-lik
     T, K = B.shape
     post = np.zeros((T, K))
     a = log_pi + B[0]
     post[0] = np.exp(a - logsumexp(a))
     for t in range(1, T):
         a = B[t] + logsumexp(a[:, None] + log_A, axis=0)
-        a -= logsumexp(a)                                           # normalize → keeps it a filter
+        a -= logsumexp(a)  # normalize → keeps it a filter
         post[t] = np.exp(a)
     return post
 
@@ -77,13 +77,13 @@ def _forward_filter(model, X: np.ndarray) -> np.ndarray:
 # ── Fit + decode ─────────────────────────────────────────────────────────────────
 async def decode_regimes(train_end: str = "2007-12-31", persist: bool = True) -> pd.DataFrame:
     """Fit the HMM on data ≤ train_end, then causally forward-filter the full series."""
-    from hmmlearn.hmm import GaussianHMM
     import joblib
+    from hmmlearn.hmm import GaussianHMM
 
     obs = await build_observations()
     train = obs[obs.index <= pd.Timestamp(train_end)]
     if len(train) < 250:
-        train = obs.iloc[: max(250, len(obs) // 2)]                 # fallback if VIX history short
+        train = obs.iloc[: max(250, len(obs) // 2)]  # fallback if VIX history short
 
     mu, sd = train.mean(), train.std().replace(0, 1)
     Xtr = ((train - mu) / sd).values
@@ -94,7 +94,7 @@ async def decode_regimes(train_end: str = "2007-12-31", persist: bool = True) ->
 
     # Label states by their characteristics (on the train window, leak-free):
     #   highest VIX → risk_off ; highest SPX trend → trend ; remaining → chop
-    means = pd.DataFrame(model.means_, columns=obs.columns)         # standardized means
+    means = pd.DataFrame(model.means_, columns=obs.columns)  # standardized means
     order = {}
     risk_off = int(means["vix"].idxmax())
     trend = int(means["spx_ret20"].drop(index=risk_off).idxmax())
@@ -109,8 +109,10 @@ async def decode_regimes(train_end: str = "2007-12-31", persist: bool = True) ->
         out[f"p_{name}"] = post[:, s]
 
     if persist:
-        joblib.dump({"model": model, "mu": mu, "sd": sd, "order": order,
-                     "cols": list(obs.columns)}, MODELS_DIR / "hmm.pkl")
+        joblib.dump(
+            {"model": model, "mu": mu, "sd": sd, "order": order, "cols": list(obs.columns)},
+            MODELS_DIR / "hmm.pkl",
+        )
     log.info("Decoded regimes %s → %s", out.index.min().date(), out.index.max().date())
     return out
 
@@ -122,7 +124,7 @@ async def decode_regimes(train_end: str = "2007-12-31", persist: bool = True) ->
 # _REGIME_TTL seconds (and once per process at startup). A batch finishes in seconds, so it now
 # triggers exactly ONE fit; daily_prediction_cycle() calls invalidate_regime_cache() so each
 # scheduled cycle still gets a fresh regime regardless of the TTL.
-_REGIME_TTL = 900.0                       # seconds; one HMM fit per ~cycle, not per symbol
+_REGIME_TTL = 900.0  # seconds; one HMM fit per ~cycle, not per symbol
 _regime_cache: dict | None = None
 _regime_cache_ts: float = 0.0
 _regime_lock = asyncio.Lock()
@@ -142,14 +144,18 @@ async def current_regime(force: bool = False) -> dict:
     ONE fit instead of N. Pass ``force=True`` (or call ``invalidate_regime_cache()``) to refresh.
     """
     global _regime_cache, _regime_cache_ts
-    async with _regime_lock:                              # serialize so a gathered batch fits once
+    async with _regime_lock:  # serialize so a gathered batch fits once
         now = time.monotonic()
         if not force and _regime_cache is not None and (now - _regime_cache_ts) < _REGIME_TTL:
             return _regime_cache
         df = await decode_regimes(persist=True)
         last = df.iloc[-1]
         probs = {n: float(last[f"p_{n}"]) for n in STATES}
-        _regime_cache = {"regime": last["regime"], "probs": probs, "as_of": str(df.index[-1].date())}
+        _regime_cache = {
+            "regime": last["regime"],
+            "probs": probs,
+            "as_of": str(df.index[-1].date()),
+        }
         _regime_cache_ts = now
         return _regime_cache
 
@@ -157,6 +163,7 @@ async def current_regime(force: bool = False) -> dict:
 if __name__ == "__main__":
     import asyncio
     import sys
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
@@ -168,8 +175,10 @@ if __name__ == "__main__":
         print("\nRecent regimes:")
         print(df.tail(5)[["regime", "p_trend", "p_chop", "p_risk_off"]])
         # sanity: 2008 crisis & 2020 crash should be risk_off-heavy
-        for label, lo, hi in [("2008-09 to 2009-03 (GFC)", "2008-09-01", "2009-03-31"),
-                              ("2020-02 to 2020-04 (COVID)", "2020-02-15", "2020-04-30")]:
+        for label, lo, hi in [
+            ("2008-09 to 2009-03 (GFC)", "2008-09-01", "2009-03-31"),
+            ("2020-02 to 2020-04 (COVID)", "2020-02-15", "2020-04-30"),
+        ]:
             w = df[(df.index >= lo) & (df.index <= hi)]["regime"]
             ro = (w == "risk_off").mean() if len(w) else float("nan")
             print(f"  {label}: risk_off fraction = {ro:.0%}")

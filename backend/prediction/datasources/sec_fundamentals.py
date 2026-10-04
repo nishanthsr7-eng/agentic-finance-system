@@ -35,14 +35,24 @@ _TICKERS = DATASET_DIR / "company_tickers.json"
 
 # Metric -> ordered list of acceptable us-gaap tags (first present wins, per filing).
 _METRIC_TAGS = {
-    "revenue":     ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"],
-    "net_income":  ["NetIncomeLoss"],
-    "op_income":   ["OperatingIncomeLoss"],
-    "assets":      ["Assets"],
+    "revenue": [
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "Revenues",
+        "SalesRevenueNet",
+    ],
+    "net_income": ["NetIncomeLoss"],
+    "op_income": ["OperatingIncomeLoss"],
+    "assets": ["Assets"],
     "liabilities": ["Liabilities"],
-    "equity":      ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
+    "equity": [
+        "StockholdersEquity",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    ],
     "eps_diluted": ["EarningsPerShareDiluted"],
-    "cash":        ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
+    "cash": [
+        "CashAndCashEquivalentsAtCarryingValue",
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    ],
 }
 _ALL_TAGS = {t for tags in _METRIC_TAGS.values() for t in tags}
 _NUM_COLS = ["adsh", "tag", "ddate", "qtrs", "segments", "coreg", "value"]
@@ -68,8 +78,9 @@ def _subs_for(quarter_dir, cik_to_ticker: dict[int, str]) -> pd.DataFrame:
     sub_fp = quarter_dir / "sub.txt"
     if not sub_fp.exists():
         return pd.DataFrame()
-    sub = pd.read_csv(sub_fp, sep="\t", dtype=str,
-                      usecols=["adsh", "cik", "form", "period", "fy", "fp", "filed"])
+    sub = pd.read_csv(
+        sub_fp, sep="\t", dtype=str, usecols=["adsh", "cik", "form", "period", "fy", "fp", "filed"]
+    )
     sub["cik"] = pd.to_numeric(sub["cik"], errors="coerce")
     sub = sub[sub["cik"].isin(cik_to_ticker) & sub["form"].isin(["10-K", "10-Q", "20-F"])]
     if sub.empty:
@@ -100,14 +111,15 @@ def _nums_for(quarter_dir, adsh_set: set[str]) -> pd.DataFrame:
     facts["value"] = pd.to_numeric(facts["value"], errors="coerce")
     facts = facts.dropna(subset=["value"])
     # Per (adsh, tag): take the latest reporting period (max ddate), then the longest span (max qtrs).
-    facts = (facts.sort_values(["ddate", "qtrs"])
-                  .drop_duplicates(["adsh", "tag"], keep="last"))
+    facts = facts.sort_values(["ddate", "qtrs"]).drop_duplicates(["adsh", "tag"], keep="last")
     # Coalesce each metric's candidate tags into one column.
     rows = {}
     for adsh, g in facts.groupby("adsh"):
         by_tag = dict(zip(g["tag"], g["value"]))
-        rows[adsh] = {m: next((by_tag[t] for t in tags if t in by_tag), None)
-                      for m, tags in _METRIC_TAGS.items()}
+        rows[adsh] = {
+            m: next((by_tag[t] for t in tags if t in by_tag), None)
+            for m, tags in _METRIC_TAGS.items()
+        }
     return pd.DataFrame.from_dict(rows, orient="index").rename_axis("adsh").reset_index()
 
 
@@ -150,15 +162,20 @@ def load_sec_fundamentals(rebuild: bool = False) -> pd.DataFrame:
 
 if __name__ == "__main__":
     import sys
+
     df = load_sec_fundamentals(rebuild="--rebuild" in sys.argv)
     if df.empty:
         print("SEC: no data (extract the quarter zips into extracted/ first).")
         sys.exit(0)
     # Point-in-time invariant: a filing is only known on/after its filing date.
-    assert (df["date"] >= df["period"]).all(), "filing date precedes its own reporting period (leak!)"
+    assert (df["date"] >= df["period"]).all(), (
+        "filing date precedes its own reporting period (leak!)"
+    )
     assert df.duplicated(["symbol", "date"]).sum() == 0
-    print(f"SEC fundamentals: {len(df):,} filings over {df.symbol.nunique()} tickers "
-          f"({df.date.min().date()}..{df.date.max().date()})")
+    print(
+        f"SEC fundamentals: {len(df):,} filings over {df.symbol.nunique()} tickers "
+        f"({df.date.min().date()}..{df.date.max().date()})"
+    )
     print("tickers:", sorted(df.symbol.unique()))
     cov = {m: f"{df[m].notna().mean():.0%}" for m in _METRIC_TAGS if m in df}
     print("metric coverage:", cov)

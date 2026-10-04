@@ -27,6 +27,7 @@ import pandas as pd
 
 log = logging.getLogger("flux.prediction.features")
 
+
 # ── Wilder's smoothing (RMA): EMA with alpha = 1/n ─────────────────────────────
 def _rma(s: pd.Series, n: int) -> pd.Series:
     return s.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
@@ -37,12 +38,12 @@ def _trend(df: pd.DataFrame) -> pd.DataFrame:
     c = df["close"]
     out = pd.DataFrame(index=df.index)
     for n in (5, 10, 20, 50, 200):
-        out[f"sma_{n}"] = c / c.rolling(n).mean() - 1          # price vs SMA (ratio, stationary)
+        out[f"sma_{n}"] = c / c.rolling(n).mean() - 1  # price vs SMA (ratio, stationary)
     ema12 = c.ewm(span=12, adjust=False).mean()
     ema26 = c.ewm(span=26, adjust=False).mean()
     macd = ema12 - ema26
     signal = macd.ewm(span=9, adjust=False).mean()
-    out["macd"] = macd / c                                     # normalise by price
+    out["macd"] = macd / c  # normalise by price
     out["macd_signal"] = signal / c
     out["macd_hist"] = (macd - signal) / c
 
@@ -52,9 +53,9 @@ def _trend(df: pd.DataFrame) -> pd.DataFrame:
     dn = -low.diff()
     plus_dm = np.where((up > dn) & (up > 0), up, 0.0)
     minus_dm = np.where((dn > up) & (dn > 0), dn, 0.0)
-    tr = pd.concat([(high - low),
-                    (high - close.shift()).abs(),
-                    (low - close.shift()).abs()], axis=1).max(axis=1)
+    tr = pd.concat(
+        [(high - low), (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1
+    ).max(axis=1)
     atr = _rma(tr, 14)
     plus_di = 100 * _rma(pd.Series(plus_dm, index=df.index), 14) / atr
     minus_di = 100 * _rma(pd.Series(minus_dm, index=df.index), 14) / atr
@@ -94,11 +95,11 @@ def _volatility(df: pd.DataFrame) -> pd.DataFrame:
 
     ma20 = c.rolling(20).mean()
     sd20 = c.rolling(20).std()
-    out["bb_width"] = (4 * sd20) / ma20                        # band width as % of price
+    out["bb_width"] = (4 * sd20) / ma20  # band width as % of price
     out["bb_pctb"] = (c - (ma20 - 2 * sd20)) / (4 * sd20).replace(0, np.nan)
 
     tr = pd.concat([(h - l), (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    out["atr_14"] = _rma(tr, 14) / c                           # ATR as % of price
+    out["atr_14"] = _rma(tr, 14) / c  # ATR as % of price
 
     logret = np.log(c / c.shift())
     out["rvol_5"] = logret.rolling(5).std()
@@ -115,7 +116,7 @@ def _volume(df: pd.DataFrame) -> pd.DataFrame:
     obv = (np.sign(c.diff()).fillna(0) * v).cumsum()
     out["obv_slope"] = obv.diff(5) / (v.rolling(20).mean() + 1)
 
-    out["vol_ratio"] = v / (v.rolling(20).mean() + 1)          # today vs 20-day avg volume
+    out["vol_ratio"] = v / (v.rolling(20).mean() + 1)  # today vs 20-day avg volume
 
     # Money Flow Index (14)
     tp = (h + l + c) / 3
@@ -133,7 +134,7 @@ def _returns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
     for n in (1, 5, 10, 20):
         out[f"logret_{n}"] = np.log(c / c.shift(n))
-    out["gap"] = (o - c.shift()) / c.shift()                   # overnight gap
+    out["gap"] = (o - c.shift()) / c.shift()  # overnight gap
     out["intraday_range"] = (df["high"] - df["low"]) / c
     return out
 
@@ -159,7 +160,7 @@ def _fracdiff_weights(d: float, thresh: float = 1e-4, max_k: int = 200) -> np.nd
         if abs(w_k) < thresh:
             break
         w.append(w_k)
-    return np.array(w[::-1])                                   # oldest→newest for convolution
+    return np.array(w[::-1])  # oldest→newest for convolution
 
 
 def frac_diff(series: pd.Series, d: float, thresh: float = 1e-4) -> pd.Series:
@@ -169,7 +170,7 @@ def frac_diff(series: pd.Series, d: float, thresh: float = 1e-4) -> pd.Series:
     vals = series.values.astype(float)
     out = np.full(len(vals), np.nan)
     for i in range(width - 1, len(vals)):
-        window = vals[i - width + 1: i + 1]
+        window = vals[i - width + 1 : i + 1]
         if np.isnan(window).any():
             continue
         out[i] = np.dot(w, window)
@@ -183,6 +184,7 @@ def _adf_pvalue(series: pd.Series) -> float:
         return 1.0
     try:
         from statsmodels.tsa.stattools import adfuller
+
         return float(adfuller(s, maxlag=1, regression="c", autolag=None)[1])
     except Exception:
         return 1.0
@@ -209,7 +211,7 @@ def _fracdiff_block(df: pd.DataFrame, d: float) -> pd.DataFrame:
     logp = np.log(df["close"])
     out = pd.DataFrame(index=df.index)
     out["fd_logclose"] = frac_diff(logp, d)
-    out["_ffd_order"] = d                                      # diagnostic, dropped from FEATURE_COLUMNS
+    out["_ffd_order"] = d  # diagnostic, dropped from FEATURE_COLUMNS
     return out
 
 
@@ -263,10 +265,12 @@ def feature_columns(feat: pd.DataFrame) -> list[str]:
     return [c for c in feat.columns if c not in raw and c not in _DIAGNOSTIC]
 
 
-async def build_features(symbol: str, start: str | None = None,
-                         fd_order: float = DEFAULT_FD_ORDER) -> pd.DataFrame:
+async def build_features(
+    symbol: str, start: str | None = None, fd_order: float = DEFAULT_FD_ORDER
+) -> pd.DataFrame:
     """Load history from the DB and build the feature matrix for one symbol."""
     from ..db import get_history
+
     rows = await get_history(symbol, start)
     if not rows:
         log.warning("No history for %s", symbol)

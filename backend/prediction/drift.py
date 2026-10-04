@@ -31,10 +31,10 @@ import numpy as np
 log = logging.getLogger("flux.prediction.drift")
 
 MODELS_DIR = Path(__file__).parent / "models"
-MIN_N = 200                  # need this many resolved trades before trusting live metrics
-ACC_FLOOR = 0.48             # below ~coin-flip-minus → something broke
-ECE_CEIL = 0.10              # calibration error ceiling before we consider it drifted
-MIN_RETRAIN_AGE_DAYS = 3     # rate-limit: don't retrain more often than this
+MIN_N = 200  # need this many resolved trades before trusting live metrics
+ACC_FLOOR = 0.48  # below ~coin-flip-minus → something broke
+ECE_CEIL = 0.10  # calibration error ceiling before we consider it drifted
+MIN_RETRAIN_AGE_DAYS = 3  # rate-limit: don't retrain more often than this
 
 
 def _ece(conf01: np.ndarray, correct: np.ndarray, bins: int = 10) -> float:
@@ -50,15 +50,14 @@ def _ece(conf01: np.ndarray, correct: np.ndarray, bins: int = 10) -> float:
 async def compute_live_metrics(min_n: int = MIN_N) -> dict:
     """Live accuracy + ECE from resolved outcomes. status='insufficient' until min_n resolved."""
     from ..db import get_resolved_outcomes
+
     rows = await get_resolved_outcomes()
     n = len(rows)
     if n < min_n:
-        return {"n": n, "accuracy": None, "ece": None, "status": "insufficient",
-                "needed": min_n}
+        return {"n": n, "accuracy": None, "ece": None, "status": "insufficient", "needed": min_n}
     conf = np.array([(r.get("confidence") or 0) / 100.0 for r in rows], dtype=float)
     correct = np.array([int(r.get("correct") or 0) for r in rows], dtype=float)
-    return {"n": n, "accuracy": float(correct.mean()), "ece": _ece(conf, correct),
-            "status": "ok"}
+    return {"n": n, "accuracy": float(correct.mean()), "ece": _ece(conf, correct), "status": "ok"}
 
 
 def _last_trained_days() -> float | None:
@@ -81,8 +80,12 @@ async def check_drift() -> dict:
             reasons.append(f"accuracy {m['accuracy']:.3f} < floor {ACC_FLOOR}")
         if m["ece"] > ECE_CEIL:
             reasons.append(f"ECE {m['ece']:.3f} > ceil {ECE_CEIL}")
-    return {"drift": bool(reasons), "reasons": reasons, "metrics": m,
-            "last_trained_days": _last_trained_days()}
+    return {
+        "drift": bool(reasons),
+        "reasons": reasons,
+        "metrics": m,
+        "last_trained_days": _last_trained_days(),
+    }
 
 
 async def maybe_retrain(force: bool = False) -> dict:
@@ -95,13 +98,17 @@ async def maybe_retrain(force: bool = False) -> dict:
     if not force and not d["drift"]:
         return {"retrained": False, "reason": "no drift", **d}
     if not force and age is not None and age < MIN_RETRAIN_AGE_DAYS:
-        return {"retrained": False,
-                "reason": f"rate-limited (model {age:.1f}d < {MIN_RETRAIN_AGE_DAYS}d)", **d}
+        return {
+            "retrained": False,
+            "reason": f"rate-limited (model {age:.1f}d < {MIN_RETRAIN_AGE_DAYS}d)",
+            **d,
+        }
 
     log.warning("Drift retrain triggered: reasons=%s force=%s", d["reasons"], force)
     try:
         from .train import main as train_main
-        await train_main()                                    # regenerates all artifacts
+
+        await train_main()  # regenerates all artifacts
         return {"retrained": True, "reason": "forced" if force else "; ".join(d["reasons"]), **d}
     except Exception as exc:
         log.error("Drift retrain failed: %s", exc)
@@ -112,10 +119,12 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path as _P
+
     sys.path.insert(0, str(_P(__file__).resolve().parents[2]))
 
     async def _demo():
         from backend.db import init_db
+
         await init_db()
         print("live metrics :", await compute_live_metrics())
         print("drift check  :", await check_drift())

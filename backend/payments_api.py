@@ -24,13 +24,14 @@ Routes
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .auth import require_user
 from . import mysql_db as M
+from .auth import require_user
 
 log = logging.getLogger("flux.payments")
 
@@ -42,31 +43,13 @@ payments_router = APIRouter(prefix="/db", tags=["payments"])
 DEFAULT_MONTHLY_LIMIT = 100_000.0
 
 
-def ensure_payments_schema() -> None:
-    """Add accounts.credit_limit if missing so the source card can show a real
-    available-limit figure (distinct from the running balance). Idempotent."""
-    try:
-        cols = M.query("SHOW COLUMNS FROM accounts LIKE 'credit_limit'")
-        if not cols:
-            with M.get_conn() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "ALTER TABLE accounts ADD COLUMN credit_limit DECIMAL(16,2) "
-                    "NOT NULL DEFAULT 0"
-                )
-            log.info("accounts.credit_limit column added")
-    except Exception as e:  # noqa: BLE001 — MySQL down: routes surface it later
-        log.warning("ensure_payments_schema skipped: %s", e)
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def _active_account(user_id: int, name: str | None = None) -> dict | None:
     if name:
-        row = M.query_one(
-            "SELECT * FROM accounts WHERE user_id=%s AND name=%s", (user_id, name)
-        )
+        row = M.query_one("SELECT * FROM accounts WHERE user_id=%s AND name=%s", (user_id, name))
         if row:
             return row
     return M.query_one(
@@ -89,6 +72,7 @@ def _available(acct: dict) -> float:
 
 # ── Transactions ─────────────────────────────────────────────────────────────
 
+
 class TxnRequest(BaseModel):
     title: str = Field(..., max_length=200)
     amount: float = Field(..., description="Signed: negative = outgoing, positive = incoming")
@@ -101,8 +85,11 @@ def _map_txn(row: dict) -> dict:
     return {
         "id": row.get("ext_id") or ("tx_" + str(row.get("id"))),
         "title": row.get("title"),
-        "date": (row["tx_date"].isoformat() if isinstance(row.get("tx_date"), datetime)
-                 else str(row.get("tx_date"))),
+        "date": (
+            row["tx_date"].isoformat()
+            if isinstance(row.get("tx_date"), datetime)
+            else str(row.get("tx_date"))
+        ),
         "amount": float(row.get("amount") or 0),
         "category": row.get("category"),
         "account": row.get("account"),
@@ -137,7 +124,7 @@ def create_transaction(body: TxnRequest, user_id: int = Depends(require_user)) -
             )
 
     tx_type = "income" if amount > 0 else ("transfer" if body.category == "transfer" else "expense")
-    ext_id = "tx_" + str(int(_now().timestamp() * 1000))
+    ext_id = "tx_" + secrets.token_hex(8)  # unique even for same-millisecond requests
     now = _now()
 
     with M.get_conn() as conn, conn.cursor() as cur:
@@ -171,6 +158,7 @@ def create_transaction(body: TxnRequest, user_id: int = Depends(require_user)) -
 
 # ── Recurring ────────────────────────────────────────────────────────────────
 
+
 class RecurringRequest(BaseModel):
     title: str = Field(..., max_length=160)
     amount: float = Field(..., gt=0)
@@ -189,13 +177,12 @@ def add_recurring(body: RecurringRequest, user_id: int = Depends(require_user)) 
             "VALUES (%s,%s,%s,%s,%s,1)",
             (user_id, title, body.amount, body.due_day, body.category),
         )
-    rows = M.query(
-        "SELECT * FROM recurring_payments WHERE user_id=%s ORDER BY due_day", (user_id,)
-    )
+    rows = M.query("SELECT * FROM recurring_payments WHERE user_id=%s ORDER BY due_day", (user_id,))
     return {"ok": True, "recurring": rows}
 
 
 # ── Security / protocol toggles ──────────────────────────────────────────────
+
 
 class ToggleRequest(BaseModel):
     index: int = Field(..., ge=0, description="0-based position among security settings")
@@ -224,6 +211,7 @@ def toggle_security(body: ToggleRequest, user_id: int = Depends(require_user)) -
 
 # ── Rewards ──────────────────────────────────────────────────────────────────
 
+
 class ClaimRequest(BaseModel):
     reward_key: str = Field(..., max_length=80)
 
@@ -245,6 +233,7 @@ def claim_reward(body: ClaimRequest, user_id: int = Depends(require_user)) -> di
 
 
 # ── Account switch ───────────────────────────────────────────────────────────
+
 
 class ActivateRequest(BaseModel):
     account_id: int | None = None

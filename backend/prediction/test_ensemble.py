@@ -15,15 +15,26 @@ Covered:
     regime-switch truth where the decorrelated base learner gives it something to fuse
   • save / load round-trip is prediction-identical
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 from backend.prediction.ensemble import (
-    RegimeStacker, train_regime_stack, train_stack, _fit_experts, _make_meta_learner,
-    oof_base2, make_base2, REGIMES, BASE_SIGNALS, REGIME_PROBS, OOF_COLS, FEATURES,
-    MIN_REGIME_ROWS, GATE_MARGIN, PRIMARY_BLEND,
+    BASE_SIGNALS,
+    FEATURES,
+    GATE_MARGIN,
+    MIN_REGIME_ROWS,
+    REGIME_PROBS,
+    REGIMES,
+    RegimeStacker,
+    _fit_experts,
+    _make_meta_learner,
+    make_base2,
+    oof_base2,
+    train_regime_stack,
+    train_stack,
 )
 
 
@@ -38,28 +49,33 @@ def _synth_oof(n: int = 6000, seed: int = 7) -> tuple[pd.DataFrame, np.ndarray]:
     """
     rng = np.random.default_rng(seed)
     regime = rng.choice(REGIMES, size=n, p=[0.55, 0.30, 0.15])
-    s1 = rng.normal(0, 1, n)                       # primary latent
-    s2 = 0.3 * s1 + rng.normal(0, 1, n)            # base2 latent (partly independent)
-    z = np.where(regime == "trend", 1.2 * s1,
-                 np.where(regime == "risk_off", 1.2 * s2, 0.4 * s1 + 0.4 * s2))
+    s1 = rng.normal(0, 1, n)  # primary latent
+    s2 = 0.3 * s1 + rng.normal(0, 1, n)  # base2 latent (partly independent)
+    z = np.where(
+        regime == "trend", 1.2 * s1, np.where(regime == "risk_off", 1.2 * s2, 0.4 * s1 + 0.4 * s2)
+    )
     y = (rng.uniform(size=n) < 1 / (1 + np.exp(-z))).astype(int)
 
     def _prob(latent, noise):
         return np.clip(1 / (1 + np.exp(-(latent + rng.normal(0, noise, n)))), 1e-4, 1 - 1e-4)
 
-    base = {r: np.full(n, 0.1) for r in REGIMES}   # confident soft one-hot on the true regime
+    base = {r: np.full(n, 0.1) for r in REGIMES}  # confident soft one-hot on the true regime
     for i, r in enumerate(regime):
         base[r][i] = 0.8
-    feats = pd.DataFrame({
-        "primary_cal": _prob(s1, 0.5),
-        "p2_base": _prob(s2, 0.5),
-        "meta_prob": np.clip(rng.uniform(0.45, 0.6, n), 0, 1),
-        "mag_oof": rng.normal(0, 0.02, n),
-        "p_trend": base["trend"], "p_chop": base["chop"], "p_risk_off": base["risk_off"],
-        "regime": regime,
-        "_date": pd.date_range("2008-01-01", periods=n, freq="D"),
-        "_y": y,
-    })
+    feats = pd.DataFrame(
+        {
+            "primary_cal": _prob(s1, 0.5),
+            "p2_base": _prob(s2, 0.5),
+            "meta_prob": np.clip(rng.uniform(0.45, 0.6, n), 0, 1),
+            "mag_oof": rng.normal(0, 0.02, n),
+            "p_trend": base["trend"],
+            "p_chop": base["chop"],
+            "p_risk_off": base["risk_off"],
+            "regime": regime,
+            "_date": pd.date_range("2008-01-01", periods=n, freq="D"),
+            "_y": y,
+        }
+    )
     return feats, y
 
 
@@ -70,13 +86,17 @@ def _manual_predict(stacker: RegimeStacker, feats: pd.DataFrame) -> np.ndarray:
     """Reference implementation: posterior-weighted mixture of experts, shrunk toward primary."""
     Xs = stacker.scaler.transform(feats[stacker.features].values.astype(float))
     rp = feats[REGIME_PROBS].values.astype(float)
-    mix = np.zeros(len(feats)); wsum = np.zeros(len(feats))
+    mix = np.zeros(len(feats))
+    wsum = np.zeros(len(feats))
     for j, r in enumerate(REGIMES):
         m = stacker.experts.get(r, stacker.global_model)
         mix += rp[:, j] * m.predict_proba(Xs)[:, 1]
         wsum += rp[:, j]
-    mix = np.where(wsum > 1e-9, mix / np.where(wsum > 1e-9, wsum, 1.0),
-                   stacker.global_model.predict_proba(Xs)[:, 1])
+    mix = np.where(
+        wsum > 1e-9,
+        mix / np.where(wsum > 1e-9, wsum, 1.0),
+        stacker.global_model.predict_proba(Xs)[:, 1],
+    )
     b = stacker.primary_blend
     return np.clip((1 - b) * mix + b * feats["primary_cal"].values.astype(float), 0, 1)
 
@@ -89,8 +109,8 @@ def _check_mixture_math(stacker: RegimeStacker, feats: pd.DataFrame) -> str:
 
     row = feats.iloc[100]
     scalar = stacker.predict_proba(
-        {c: float(row[c]) for c in BASE_SIGNALS},
-        {r: float(row[f"p_{r}"]) for r in REGIMES})
+        {c: float(row[c]) for c in BASE_SIGNALS}, {r: float(row[f"p_{r}"]) for r in REGIMES}
+    )
     assert abs(scalar - batch[100]) < 1e-9, f"scalar {scalar} != batch {batch[100]}"
     return f"batch==manual; scalar==batch (blend->primary {stacker.primary_blend:.2f})"
 
@@ -110,18 +130,21 @@ def _check_hard_routing(feats: pd.DataFrame) -> str:
     """
     feats2, y2 = _synth_oof(4000, seed=11)
     from sklearn.preprocessing import StandardScaler
+
     X = feats2[BASE_SIGNALS].values.astype(float)
     scaler = StandardScaler().fit(X)
     Xs = scaler.transform(X)
     glob = _make_meta_learner().fit(Xs, y2)
     experts = _fit_experts(Xs, y2, feats2["regime"].values, glob, min_rows=MIN_REGIME_ROWS)
-    stacker = RegimeStacker(experts, glob, scaler, BASE_SIGNALS, primary_blend=0.0, use_experts=True)
+    stacker = RegimeStacker(
+        experts, glob, scaler, BASE_SIGNALS, primary_blend=0.0, use_experts=True
+    )
 
     for r in REGIMES:
         expert = stacker.experts.get(r, stacker.global_model)
         f2 = feats2.copy()
         for rr in REGIMES:
-            f2[f"p_{rr}"] = 1.0 if rr == r else 0.0          # one-hot gate
+            f2[f"p_{rr}"] = 1.0 if rr == r else 0.0  # one-hot gate
         want = expert.predict_proba(Xs)[:, 1]
         got = stacker.predict_proba_batch(f2)
         assert np.allclose(got, want, atol=1e-9), f"one-hot {r} did not select that expert"
@@ -132,15 +155,18 @@ def _check_fallback() -> str:
     """Experts with < min_rows fall back to global; zero total posterior degrades to global."""
     feats, y = _synth_oof(2000, seed=3)
     from sklearn.preprocessing import StandardScaler
+
     X = feats[BASE_SIGNALS].values.astype(float)
     scaler = StandardScaler().fit(X)
     Xs = scaler.transform(X)
     glob = _make_meta_learner().fit(Xs, y)
-    experts = _fit_experts(Xs, y, feats["regime"].values, glob, min_rows=10 ** 9)
+    experts = _fit_experts(Xs, y, feats["regime"].values, glob, min_rows=10**9)
     assert all(experts[r] is glob for r in REGIMES), "huge min_rows should force global fallback"
 
-    stacker = RegimeStacker(experts, glob, scaler, BASE_SIGNALS, primary_blend=0.0, use_experts=False)
-    f2 = feats.copy()                                        # zero total posterior -> global fallback
+    stacker = RegimeStacker(
+        experts, glob, scaler, BASE_SIGNALS, primary_blend=0.0, use_experts=False
+    )
+    f2 = feats.copy()  # zero total posterior -> global fallback
     for rr in REGIMES:
         f2[f"p_{rr}"] = 0.0
     got = stacker.predict_proba_batch(f2)
@@ -170,32 +196,44 @@ def _check_oof_base2_alignment() -> str:
 
 def _check_gate_logic(rep: dict) -> str:
     """The report's gate flag and best-base bookkeeping must be internally consistent."""
-    assert abs(rep["best_base_auc"] - max(rep["primary_auc"], rep["p2_auc"])) < 1e-12, \
+    assert abs(rep["best_base_auc"] - max(rep["primary_auc"], rep["p2_auc"])) < 1e-12, (
         "best_base_auc != max(primary, p2)"
+    )
     expected = rep["stack_auc"] > rep["best_base_auc"] + GATE_MARGIN
     assert rep["gate6_pass"] == expected, "gate6_pass inconsistent with stack vs best-base + margin"
     assert abs(rep["lift_vs_best_base"] - (rep["stack_auc"] - rep["best_base_auc"])) < 1e-12
-    return (f"stack {rep['stack_auc']:.4f} vs best base {rep['best_base_auc']:.4f} "
-            f"({rep['lift_vs_best_base']:+.4f}) -> gate6_pass={rep['gate6_pass']}")
+    return (
+        f"stack {rep['stack_auc']:.4f} vs best base {rep['best_base_auc']:.4f} "
+        f"({rep['lift_vs_best_base']:+.4f}) -> gate6_pass={rep['gate6_pass']}"
+    )
 
 
 def _check_moe_earns_place(rep: dict) -> str:
     """On regime-switch truth the per-regime experts beat the global stack and the gate should pass."""
     assert rep["use_experts"], "regime experts should self-enable on regime-switch truth"
-    assert rep["moe_stack_auc"] > rep["global_stack_auc"], \
+    assert rep["moe_stack_auc"] > rep["global_stack_auc"], (
         f"MoE did not beat global on switch truth ({rep['moe_stack_auc']} <= {rep['global_stack_auc']})"
-    assert rep["gate6_pass"] and rep["stack_auc"] > rep["best_base_auc"], "stack should clear GATE-6"
-    return (f"MoE {rep['moe_stack_auc']:.4f} > global {rep['global_stack_auc']:.4f}; "
-            f"stack {rep['stack_auc']:.4f} > best base {rep['best_base_auc']:.4f}")
+    )
+    assert rep["gate6_pass"] and rep["stack_auc"] > rep["best_base_auc"], (
+        "stack should clear GATE-6"
+    )
+    return (
+        f"MoE {rep['moe_stack_auc']:.4f} > global {rep['global_stack_auc']:.4f}; "
+        f"stack {rep['stack_auc']:.4f} > best base {rep['best_base_auc']:.4f}"
+    )
 
 
 def _check_save_load(stacker: RegimeStacker, feats: pd.DataFrame, tmp_path) -> str:
     p = tmp_path / "regime_stack.pkl"
     stacker.save(p)
     loaded = RegimeStacker.load(p)
-    assert np.allclose(loaded.predict_proba_batch(feats), stacker.predict_proba_batch(feats), atol=1e-12)
+    assert np.allclose(
+        loaded.predict_proba_batch(feats), stacker.predict_proba_batch(feats), atol=1e-12
+    )
     assert loaded.report.get("gate6_pass") == stacker.report.get("gate6_pass")
-    assert loaded.use_experts == stacker.use_experts and loaded.primary_blend == stacker.primary_blend
+    assert (
+        loaded.use_experts == stacker.use_experts and loaded.primary_blend == stacker.primary_blend
+    )
     return "save/load round-trip prediction-identical (experts + blend preserved)"
 
 
@@ -258,8 +296,14 @@ def test_legacy_flat_stacker_still_works():
     n = 2000
     primary = rng.uniform(0.3, 0.7, n)
     y = (rng.uniform(size=n) < primary).astype(int)
-    feats = pd.DataFrame({"primary_cal": primary, "meta_prob": rng.uniform(0.4, 0.6, n),
-                          "mag_oof": rng.normal(0, 0.02, n), "regime_scale": 1.0})
+    feats = pd.DataFrame(
+        {
+            "primary_cal": primary,
+            "meta_prob": rng.uniform(0.4, 0.6, n),
+            "mag_oof": rng.normal(0, 0.02, n),
+            "regime_scale": 1.0,
+        }
+    )
     stacker, rep = train_stack(feats, y)
     p = stacker.predict_proba(0.6, 0.55, 0.01, "trend")
     assert 0.0 <= p <= 1.0 and set(rep["coef"]) == set(FEATURES)

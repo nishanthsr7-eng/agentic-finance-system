@@ -8,8 +8,13 @@ Writes Dataset/deribit/dvol_<CCY>.csv with columns: date, ts, open, high, low, c
 `close` is the DVOL value (annualized implied vol, %). This is the crypto analog of VIX and,
 unlike equity option chains, it is fully backfillable → can enter leak-free training.
 """
+
 from __future__ import annotations
-import argparse, datetime as dt, sys, time
+
+import argparse
+import datetime as dt
+import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -26,18 +31,27 @@ def fetch(ccy: str, years: int, resolution: str) -> pd.DataFrame:
     start = now - int(years * 365.25 * 24 * 3600 * 1000)
     rows, end = [], now
     while end > start:
-        p = {"currency": ccy, "start_timestamp": start, "end_timestamp": end, "resolution": resolution}
+        p = {
+            "currency": ccy,
+            "start_timestamp": start,
+            "end_timestamp": end,
+            "resolution": resolution,
+        }
         r = requests.get(URL, params=p, timeout=30).json()
         data = r.get("result", {}).get("data", [])
         if not data:
             break
         rows += data
         earliest = min(row[0] for row in data)
-        if earliest <= start or earliest >= end:            # reached inception / no progress
+        if earliest <= start or earliest >= end:  # reached inception / no progress
             break
         end = earliest - 1
         time.sleep(0.2)
-    df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"]).drop_duplicates("ts").sort_values("ts")
+    df = (
+        pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close"])
+        .drop_duplicates("ts")
+        .sort_values("ts")
+    )
     df.insert(0, "date", pd.to_datetime(df["ts"], unit="ms").dt.strftime("%Y-%m-%d"))
     return df
 
@@ -51,7 +65,8 @@ def main():
     print(f"Deribit DVOL -> {OUT}  (years {a.years}, resolution {a.resolution})")
     for ccy in ("BTC", "ETH"):
         df = fetch(ccy, a.years, a.resolution)
-        fp = OUT / f"dvol_{ccy}.csv"; df.to_csv(fp, index=False)
+        fp = OUT / f"dvol_{ccy}.csv"
+        df.to_csv(fp, index=False)
         span = f"{df['date'].iloc[0]}..{df['date'].iloc[-1]}" if len(df) else "empty"
         print(f"  {ccy}: {len(df):>5} rows  {span}")
     print("DONE")

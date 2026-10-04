@@ -58,7 +58,9 @@ if __name__ == "__main__":
     assert not df.empty, "no blockchain.com CSVs found in Dataset/"
     assert (df["symbol"] == "BTC").all()
     assert df.duplicated(["symbol", "date"]).sum() == 0
-    print(f"blockchain.com BTC: {len(df):,} daily rows "
-          f"({df.date.min().date()}..{df.date.max().date()})")
+    print(
+        f"blockchain.com BTC: {len(df):,} daily rows "
+        f"({df.date.min().date()}..{df.date.max().date()})"
+    )
     print(df.tail(3).to_string(index=False))
     print("OK")

@@ -48,10 +48,10 @@ from .regime import REGIME_SCALE
 log = logging.getLogger("flux.prediction.flux_x")
 
 # GATE-7 champion defaults (the deployable book). See portfolio.py for the evidence trail.
-FRAC = 0.10                  # long-only top decile
-VOL_TARGET = 0.30            # annualized vol target for the book (causal lever)
-VOL_WINDOW = 20              # trailing trading days for the causal basket-vol estimate
-MAX_LEVERAGE = 3.0           # cap on the vol-target leverage
+FRAC = 0.10  # long-only top decile
+VOL_TARGET = 0.30  # annualized vol target for the book (causal lever)
+VOL_WINDOW = 20  # trailing trading days for the causal basket-vol estimate
+MAX_LEVERAGE = 3.0  # cap on the vol-target leverage
 TRADING_DAYS = 252
 DEFAULT_EQUITY = 100_000.0
 
@@ -73,8 +73,9 @@ async def _basket_daily_vol(symbols: list[str], window: int = VOL_WINDOW) -> flo
     Equal-weight the names' daily log returns, then take the std of the last `window` basket
     returns. Returns None if there isn't enough shared history (caller falls back to 1× leverage).
     """
-    from ..db import get_history
     import pandas as pd
+
+    from ..db import get_history
 
     rets = {}
     for sym in symbols:
@@ -94,8 +95,9 @@ async def _basket_daily_vol(symbols: list[str], window: int = VOL_WINDOW) -> flo
     return sd if np.isfinite(sd) and sd > 0 else None
 
 
-def _vol_target_leverage(basket_vol: float | None, *, vol_target: float = VOL_TARGET,
-                         max_leverage: float = MAX_LEVERAGE) -> float:
+def _vol_target_leverage(
+    basket_vol: float | None, *, vol_target: float = VOL_TARGET, max_leverage: float = MAX_LEVERAGE
+) -> float:
     """clip(target_daily / trailing_basket_vol, 0, max_leverage). 1× when no estimate (warm-up)."""
     if not vol_target or basket_vol is None or basket_vol <= 0:
         return 1.0
@@ -103,12 +105,21 @@ def _vol_target_leverage(basket_vol: float | None, *, vol_target: float = VOL_TA
     return float(min(max_leverage, max(0.0, target_daily / basket_vol)))
 
 
-async def construct_book(predictions: list[dict], *, equity: float = DEFAULT_EQUITY,
-                         frac: float = FRAC, regime: str | None = None, rank: str = "edge",
-                         min_edge: float = 0.0, use_regime_gate: bool = True,
-                         vol_target: float | None = VOL_TARGET, max_leverage: float = MAX_LEVERAGE,
-                         vol_window: int = VOL_WINDOW, kelly: bool = False,
-                         inv_vol: bool = False) -> dict:
+async def construct_book(
+    predictions: list[dict],
+    *,
+    equity: float = DEFAULT_EQUITY,
+    frac: float = FRAC,
+    regime: str | None = None,
+    rank: str = "edge",
+    min_edge: float = 0.0,
+    use_regime_gate: bool = True,
+    vol_target: float | None = VOL_TARGET,
+    max_leverage: float = MAX_LEVERAGE,
+    vol_window: int = VOL_WINDOW,
+    kelly: bool = False,
+    inv_vol: bool = False,
+) -> dict:
     """
     Step 8 (live): turn today's per-symbol leaderboard into today's target book.
 
@@ -145,33 +156,48 @@ async def construct_book(predictions: list[dict], *, equity: float = DEFAULT_EQU
     if longs:
         if kelly or inv_vol:
             from .portfolio import leg_weights
+
             meta = np.array([float(p.get("meta_prob") or 0.5) for p in longs])
             vols = np.array([float(p.get("trail_vol") or np.nan) for p in longs])
             w = leg_weights(meta, vols, kelly=kelly, inv_vol=inv_vol)
         else:
-            w = np.full(len(longs), 1.0 / len(longs))    # equal weight — the locked champion
+            w = np.full(len(longs), 1.0 / len(longs))  # equal weight — the locked champion
 
         gross = REGIME_SCALE.get(regime, 1.0) if use_regime_gate else 1.0
-        basket_vol = await _basket_daily_vol([p["symbol"] for p in longs], vol_window) \
-            if vol_target else None
+        basket_vol = (
+            await _basket_daily_vol([p["symbol"] for p in longs], vol_window)
+            if vol_target
+            else None
+        )
         lev = _vol_target_leverage(basket_vol, vol_target=vol_target, max_leverage=max_leverage)
 
         for p, wi in zip(longs, w):
-            tgt = gross * lev * float(wi)                 # fraction of equity in this name
-            book.append({
-                "symbol": p["symbol"], "direction": "UP",
-                "edge": round(_edge(p), 4), "meta_prob": p.get("meta_prob"),
-                "act": bool(p.get("act")), "weight": round(float(wi), 4),
-                "target_frac": round(tgt, 4), "notional": round(equity * tgt, 2),
-            })
+            tgt = gross * lev * float(wi)  # fraction of equity in this name
+            book.append(
+                {
+                    "symbol": p["symbol"],
+                    "direction": "UP",
+                    "edge": round(_edge(p), 4),
+                    "meta_prob": p.get("meta_prob"),
+                    "act": bool(p.get("act")),
+                    "weight": round(float(wi), 4),
+                    "target_frac": round(tgt, 4),
+                    "notional": round(equity * tgt, 2),
+                }
+            )
     else:
         gross, lev = (REGIME_SCALE.get(regime, 1.0) if use_regime_gate else 1.0), 1.0
 
     return {
-        "regime": regime, "n_universe": n, "k": len(book),
-        "gross_exposure": round(gross, 4), "leverage": round(lev, 4),
+        "regime": regime,
+        "n_universe": n,
+        "k": len(book),
+        "gross_exposure": round(gross, 4),
+        "leverage": round(lev, 4),
         "gross_after_levers": round(sum(b["target_frac"] for b in book), 4),
-        "rank_by": rank, "vol_target": vol_target, "book": book,
+        "rank_by": rank,
+        "vol_target": vol_target,
+        "book": book,
     }
 
 
@@ -193,22 +219,32 @@ def apply_verdicts(book: dict, verdicts: list[dict]) -> dict:
             continue
         if v.get("veto"):
             n_veto += 1
-            continue                                      # dropped from the book entirely
+            continue  # dropped from the book entirely
         mc = int(v.get("model_confidence", v.get("confidence", 0)) or 0)
         fc = int(v.get("final_confidence", mc) or 0)
-        if mc > 0 and fc < mc:                            # downgrade → shrink size (never grow)
+        if mc > 0 and fc < mc:  # downgrade → shrink size (never grow)
             scale = fc / mc
-            b = {**b, "target_frac": round(b["target_frac"] * scale, 4),
-                 "notional": round(b["notional"] * scale, 2), "downgraded_to": fc}
+            b = {
+                **b,
+                "target_frac": round(b["target_frac"] * scale, 4),
+                "notional": round(b["notional"] * scale, 2),
+                "downgraded_to": fc,
+            }
             n_down += 1
         kept.append(b)
-    out = {**book, "book": kept, "vetoed": n_veto, "downgraded": n_down,
-           "gross_after_levers": round(sum(b["target_frac"] for b in kept), 4)}
+    out = {
+        **book,
+        "book": kept,
+        "vetoed": n_veto,
+        "downgraded": n_down,
+        "gross_after_levers": round(sum(b["target_frac"] for b in kept), 4),
+    }
     return out
 
 
-async def run_flux_x(equity: float | None = None, verify_top_k: int = 5,
-                     live_submit: bool = False, **book_kw) -> dict:
+async def run_flux_x(
+    equity: float | None = None, verify_top_k: int = 5, live_submit: bool = False, **book_kw
+) -> dict:
     """
     The full FLUX-X §4 loop, in order — the production rebalance turn.
 
@@ -219,10 +255,10 @@ async def run_flux_x(equity: float | None = None, verify_top_k: int = 5,
     Every outward/heavy step degrades gracefully: a missing LLM, missing Alpaca keys, or a thin
     universe never crashes the cycle — they just shrink the loop. Returns a structured report.
     """
-    from .regime import invalidate_regime_cache, current_regime
+    from .regime import current_regime, invalidate_regime_cache
     from .serve import resolve_due, run_predictions
 
-    invalidate_regime_cache()                             # one HMM fit shared across the cycle
+    invalidate_regime_cache()  # one HMM fit shared across the cycle
     n_resolved = await resolve_due()
     preds = await run_predictions()
 
@@ -234,7 +270,9 @@ async def run_flux_x(equity: float | None = None, verify_top_k: int = 5,
 
     if equity is None:
         try:
-            from .paper import account, DEFAULT_EQUITY as PAPER_EQUITY
+            from .paper import DEFAULT_EQUITY as PAPER_EQUITY
+            from .paper import account
+
             acct = await account()
             equity = acct["equity"] if acct else PAPER_EQUITY
         except Exception:
@@ -247,8 +285,9 @@ async def run_flux_x(equity: float | None = None, verify_top_k: int = 5,
     if verify_top_k:
         try:
             from .agent import verify_portfolio
+
             verdicts = await verify_portfolio(preds, top_k=verify_top_k, persist=True)
-        except Exception as exc:                          # the LLM layer must never break the loop
+        except Exception as exc:  # the LLM layer must never break the loop
             log.warning("portfolio verify skipped: %s", exc)
     book = apply_verdicts(book, verdicts)
 
@@ -256,26 +295,46 @@ async def run_flux_x(equity: float | None = None, verify_top_k: int = 5,
     paper = {"status": "skipped"}
     try:
         from .paper import submit_orders
-        orders_in = [{"symbol": b["symbol"], "act": True, "direction": b["direction"],
-                      "kelly_frac": b["target_frac"]} for b in book["book"]
-                     if b["target_frac"] > 0]
+
+        orders_in = [
+            {
+                "symbol": b["symbol"],
+                "act": True,
+                "direction": b["direction"],
+                "kelly_frac": b["target_frac"],
+            }
+            for b in book["book"]
+            if b["target_frac"] > 0
+        ]
         paper = await submit_orders(orders_in, equity=equity, live_submit=live_submit)
     except Exception as exc:
         log.warning("paper submit skipped: %s", exc)
         paper = {"status": "error", "reason": str(exc)[:120]}
 
     report = {
-        "resolved": n_resolved, "logged": len(preds), "regime": regime, "equity": equity,
-        "book_size": len(book["book"]), "gross_exposure": book.get("gross_after_levers"),
-        "leverage": book.get("leverage"), "vetoed": book.get("vetoed", 0),
+        "resolved": n_resolved,
+        "logged": len(preds),
+        "regime": regime,
+        "equity": equity,
+        "book_size": len(book["book"]),
+        "gross_exposure": book.get("gross_after_levers"),
+        "leverage": book.get("leverage"),
+        "vetoed": book.get("vetoed", 0),
         "downgraded": book.get("downgraded", 0),
-        "verified": sum(1 for v in verdicts
-                        if v.get("verifier") not in ("unavailable", "parse_error")),
-        "paper_status": paper.get("status"), "book": book["book"],
+        "verified": sum(
+            1 for v in verdicts if v.get("verifier") not in ("unavailable", "parse_error")
+        ),
+        "paper_status": paper.get("status"),
+        "book": book["book"],
     }
-    log.info("FLUX-X cycle: logged %d | book %d names | gross %.2f | regime %s | paper %s",
-             report["logged"], report["book_size"], report["gross_exposure"] or 0.0,
-             regime, report["paper_status"])
+    log.info(
+        "FLUX-X cycle: logged %d | book %d names | gross %.2f | regime %s | paper %s",
+        report["logged"],
+        report["book_size"],
+        report["gross_exposure"] or 0.0,
+        regime,
+        report["paper_status"],
+    )
     return report
 
 
@@ -283,17 +342,23 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
         from backend.db import init_db
+
         await init_db()
-        rep = await run_flux_x(verify_top_k=0)            # skip the LLM for a fast offline demo
-        print(f"FLUX-X: logged {rep['logged']} | regime {rep['regime']} | "
-              f"book {rep['book_size']} names | gross {rep['gross_exposure']} | "
-              f"lev {rep['leverage']} | paper {rep['paper_status']}")
+        rep = await run_flux_x(verify_top_k=0)  # skip the LLM for a fast offline demo
+        print(
+            f"FLUX-X: logged {rep['logged']} | regime {rep['regime']} | "
+            f"book {rep['book_size']} names | gross {rep['gross_exposure']} | "
+            f"lev {rep['leverage']} | paper {rep['paper_status']}"
+        )
         for b in rep["book"]:
-            print(f"  {b['symbol']:6} edge {b['edge']:+.3f} meta {b['meta_prob']} "
-                  f"w {b['weight']:.2f} → {b['target_frac']:.3f} (${b['notional']:,.0f})")
+            print(
+                f"  {b['symbol']:6} edge {b['edge']:+.3f} meta {b['meta_prob']} "
+                f"w {b['weight']:.2f} → {b['target_frac']:.3f} (${b['notional']:,.0f})"
+            )
 
     asyncio.run(_demo())

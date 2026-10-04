@@ -81,7 +81,8 @@ services:
       # per asset — and running them on every start is what turns a single OOM
       # kill into a restart loop, since each restart queues them again. Their
       # cron triggers (00:20 / 00:30 / Sun 02:00 UTC) are unaffected, and
-      # POST /ingestion/trigger/predictions runs the cycle on demand.
+      # POST /ingestion/trigger/predictions runs the cycle on demand (it needs the
+      # X-Admin-Token header, so ADMIN_TOKEN must be set on the service first).
       - key: HEAVY_JOBS_ON_STARTUP
         value: "false"
 

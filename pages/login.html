@@ -4,7 +4,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Log In | FLUX</title>
+  <title>Log In | Agentic AI Finance &amp; Stock Prediction</title>
+  <meta name="description" content="Log in, or try the shared demo account with a seeded portfolio and paper trades.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300e5a0' stroke-width='2'%3E%3Cpath d='M13 2L3 14h9l-1 8 10-12h-9l1-8z'/%3E%3C/svg%3E">
+  <link rel="canonical" href="https://nishanth-flux.pages.dev/pages/login">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Agentic AI Finance &amp; Stock Prediction System">
+  <meta property="og:title" content="Log In | Agentic AI Finance &amp; Stock Prediction System">
+  <meta property="og:description" content="Log in, or try the shared demo account with a seeded portfolio and paper trades.">
+  <meta property="og:url" content="https://nishanth-flux.pages.dev/pages/login">
+  <meta property="og:image" content="https://nishanth-flux.pages.dev/assets/images/og-image.png">
+  <meta property="og:image:width" content="1600">
+  <meta property="og:image:height" content="1000">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Log In | Agentic AI Finance &amp; Stock Prediction System">
+  <meta name="twitter:description" content="Log in, or try the shared demo account with a seeded portfolio and paper trades.">
+  <meta name="twitter:image" content="https://nishanth-flux.pages.dev/assets/images/og-image.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -138,6 +153,29 @@
       color: var(--text-secondary);
       text-align: right;
     }
+
+    .demo-btn {
+      width: 100%;
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .demo-btn:hover { background: rgba(255, 255, 255, 0.06); }
+
+    .demo-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-align: center;
+    }
   </style>
 </head>
 
@@ -177,6 +215,8 @@
         style="display:none;font-size:13px;color:#ff4d4d;background:rgba(255,77,77,.08);border:1px solid rgba(255,77,77,.25);border-radius:10px;padding:10px 14px;margin-bottom:8px;">
       </div>
       <button type="submit" class="auth-btn" id="login-btn">Log In</button>
+      <button type="button" class="demo-btn" id="demo-btn">Use demo account</button>
+      <p class="demo-hint">Shared demo account with a seeded portfolio and paper trades.</p>
     </form>
 
     <div class="auth-footer">
@@ -220,10 +260,11 @@
 
   <div id="toast" class="toast">
     <svg class="toast-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" y1="16" x2="12" y2="12"></line>
+      <line x1="12" y1="8" x2="12.01" y2="8"></line>
     </svg>
-    <span>Reset link sent to your email.</span>
+    <span>Password reset isn't available in this demo. Use the demo account or create a new one.</span>
   </div>
 
   <script src="../js/flux-config.js"></script>
@@ -249,6 +290,10 @@
         errEl.style.display = 'none';
         btn.disabled = true;
         btn.textContent = 'Logging in…';
+        // Render's free tier sleeps when idle; say so instead of a frozen button.
+        const slow = setTimeout(() => {
+          btn.textContent = 'Waking the server (free tier, up to a minute)…';
+        }, 3000);
         try {
           const res = await fetch(API + '/auth/login', {
             method: 'POST',
@@ -265,6 +310,7 @@
           if (data.user) localStorage.setItem('flux_user', JSON.stringify(data.user));
           window.location.href = 'dashboard.html';
         } catch (err) {
+          clearTimeout(slow);
           errEl.textContent = /failed to fetch/i.test(err.message)
             ? 'Cannot reach the FLUX server — please try again shortly.'
             : err.message;
@@ -272,6 +318,16 @@
           btn.disabled = false;
           btn.textContent = 'Log In';
         }
+      });
+    }
+
+    // Public demo credentials (also listed in the README).
+    const demoBtn = document.getElementById('demo-btn');
+    if (demoBtn && loginForm) {
+      demoBtn.addEventListener('click', function () {
+        document.getElementById('login-email').value = 'nishanth@flux.app';
+        document.getElementById('login-password').value = 'FluxDemo@123';
+        loginForm.requestSubmit();
       });
     }
 

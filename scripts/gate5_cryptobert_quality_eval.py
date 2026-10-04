@@ -15,6 +15,7 @@ text (where ``refresh_reddit`` routes it); FinBERT is the better scorer for cryp
 
     python scripts/gate5_cryptobert_quality_eval.py
 """
+
 from __future__ import annotations
 
 import sys
@@ -58,7 +59,7 @@ _LABELS = ["negative", "neutral", "positive"]
 
 
 def main() -> int:
-    from backend.prediction.sentiment import score_texts, _load_pipe, _MODELS
+    from backend.prediction.sentiment import _MODELS, _load_pipe, score_texts
 
     sentences = [s for s, _ in _SET]
     gold = [g for _, g in _SET]
@@ -66,10 +67,14 @@ def main() -> int:
     pipe = _load_pipe("crypto")
     model_name = getattr(getattr(pipe, "model", None), "name_or_path", "?")
     used_crypto = _MODELS["crypto"] in str(model_name)
-    print(f"crypto pipeline model: {model_name}  ({'CryptoBERT' if used_crypto else 'FALLBACK (FinBERT)'})")
+    print(
+        f"crypto pipeline model: {model_name}  ({'CryptoBERT' if used_crypto else 'FALLBACK (FinBERT)'})"
+    )
     if not used_crypto:
-        print("  NOTE: CryptoBERT is not cached -> ran the FinBERT fallback. Pull the model and re-run\n"
-              "        to evaluate CryptoBERT itself (this still proves the fallback path works).")
+        print(
+            "  NOTE: CryptoBERT is not cached -> ran the FinBERT fallback. Pull the model and re-run\n"
+            "        to evaluate CryptoBERT itself (this still proves the fallback path works)."
+        )
 
     pred = [lbl for lbl, _ in score_texts(sentences, asset_type="crypto")]
 
@@ -93,9 +98,11 @@ def main() -> int:
         flag = "  " if g == p else "XX"
         print(f"   {flag} [{g:>8} -> {p:>8}] {s[:60]}")
 
-    ok = dir_acc >= 0.85                           # gate on directional; neutral is CryptoBERT's hard class
-    print(f"\n  CryptoBERT scoring-quality (social domain): directional {dir_acc:.3f} (>=0.85), "
-          f"overall {acc:.3f} -> {'PASS' if ok else 'REVIEW'}")
+    ok = dir_acc >= 0.85  # gate on directional; neutral is CryptoBERT's hard class
+    print(
+        f"\n  CryptoBERT scoring-quality (social domain): directional {dir_acc:.3f} (>=0.85), "
+        f"overall {acc:.3f} -> {'PASS' if ok else 'REVIEW'}"
+    )
     print("  (CryptoBERT is social-media-tuned; use FinBERT for crypto NEWS HEADLINES.)")
     return 0 if ok else 1
 

@@ -2,7 +2,7 @@
 #
 # Two builds from one file, selected by the FULL build arg:
 #
-#   slim (default)  backend/requirements-slim.txt, no torch. ~248 MB resident,
+#   slim (default)  backend/requirements-slim.lock (exact pins of -slim.txt), no torch. ~248 MB resident,
 #                   which fits Render's free 512 MB tier. FinBERT sentiment is
 #                   replaced by SENTIMENT_BACKEND=llm; the LSTM magnitude head
 #                   and the Chronos baseline are unavailable.
@@ -74,11 +74,11 @@ RUN if [ "$FULL" = "1" ]; then \
     fi
 
 COPY --chown=user backend/requirements.txt      ./backend/requirements.txt
-COPY --chown=user backend/requirements-slim.txt ./backend/requirements-slim.txt
+COPY --chown=user backend/requirements-slim.lock ./backend/requirements-slim.lock
 RUN if [ "$FULL" = "1" ]; then \
         pip install --no-cache-dir --user -r backend/requirements.txt; \
     else \
-        pip install --no-cache-dir --user -r backend/requirements-slim.txt; \
+        pip install --no-cache-dir --user -r backend/requirements-slim.lock; \
     fi
 
 # ── Embedding model ──────────────────────────────────────────────────

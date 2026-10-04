@@ -33,8 +33,22 @@ import pandas as pd
 DATASET_DIR = Path(__file__).resolve().parents[3] / "Dataset"
 
 # DB symbol -> Coin Metrics asset id (lowercase). Also the crypto universe these loaders cover.
-CRYPTO_SYMBOLS = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "AVAX", "DOT",
-                  "LINK", "LTC", "TRX", "UNI", "DOGE", "SHIB"]
+CRYPTO_SYMBOLS = [
+    "BTC",
+    "ETH",
+    "BNB",
+    "SOL",
+    "XRP",
+    "ADA",
+    "AVAX",
+    "DOT",
+    "LINK",
+    "LTC",
+    "TRX",
+    "UNI",
+    "DOGE",
+    "SHIB",
+]
 
 
 def _to_day(ts) -> pd.Series:

@@ -69,16 +69,16 @@ MODELS_DIR = Path(__file__).parent / "models"
 
 # ── Legacy flat stack (kept for backward compatibility / unit test) ───────────────
 FEATURES = ["primary_cal", "meta_prob", "mag_oof", "regime_scale"]
-_REGIME_SCALE = {"trend": 1.0, "chop": 0.6, "risk_off": 0.25}     # mirror regime.REGIME_SCALE
+_REGIME_SCALE = {"trend": 1.0, "chop": 0.6, "risk_off": 0.25}  # mirror regime.REGIME_SCALE
 
 # ── Phase-6 regime-conditional stack ──────────────────────────────────────────────
-REGIMES = ("trend", "chop", "risk_off")                          # order matches REGIME_PROBS
+REGIMES = ("trend", "chop", "risk_off")  # order matches REGIME_PROBS
 BASE_SIGNALS = ["primary_cal", "p2_base", "meta_prob", "mag_oof"]  # the stack DESIGN MATRIX
-REGIME_PROBS = ["p_trend", "p_chop", "p_risk_off"]               # mixture GATE only (NOT features)
-OOF_COLS = BASE_SIGNALS + REGIME_PROBS                            # columns the OOF frame must carry
-MIN_REGIME_ROWS = 500          # an expert with fewer training rows falls back to the global stack
-GATE_MARGIN = 1e-4             # AUC lift above best base learner required to "earn" the stack
-PRIMARY_BLEND = 0.5            # shrink the stack this far toward the calibrated primary (robustness)
+REGIME_PROBS = ["p_trend", "p_chop", "p_risk_off"]  # mixture GATE only (NOT features)
+OOF_COLS = BASE_SIGNALS + REGIME_PROBS  # columns the OOF frame must carry
+MIN_REGIME_ROWS = 500  # an expert with fewer training rows falls back to the global stack
+GATE_MARGIN = 1e-4  # AUC lift above best base learner required to "earn" the stack
+PRIMARY_BLEND = 0.5  # shrink the stack this far toward the calibrated primary (robustness)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════
@@ -93,22 +93,30 @@ class Stacker:
         self.features = list(features)
         self.report = report or {}
 
-    def predict_proba(self, primary_cal: float, meta_prob: float,
-                      mag: float, regime: str) -> float:
+    def predict_proba(self, primary_cal: float, meta_prob: float, mag: float, regime: str) -> float:
         row = np.array([[primary_cal, meta_prob, mag, _REGIME_SCALE.get(regime, 1.0)]], dtype=float)
         row = self.scaler.transform(row)
         return float(self.model.predict_proba(row)[:, 1][0])
 
     def save(self, path: str | Path) -> None:
         import joblib
-        joblib.dump({"model": self.model, "scaler": self.scaler,
-                     "features": self.features, "report": self.report}, path)
+
+        joblib.dump(
+            {
+                "model": self.model,
+                "scaler": self.scaler,
+                "features": self.features,
+                "report": self.report,
+            },
+            path,
+        )
 
     @classmethod
-    def load(cls, path: str | Path) -> "Stacker":
+    def load(cls, path: str | Path) -> Stacker:
         # NOTE: only ever load artifacts this process trained (local, trusted). joblib uses
         # pickle, so loading an untrusted file would be an RCE risk — never load uploads here.
         import joblib
+
         d = joblib.load(path)
         return cls(d["model"], d["scaler"], d.get("features", FEATURES), d.get("report", {}))
 
@@ -130,8 +138,8 @@ def train_stack(feats: pd.DataFrame, y: np.ndarray) -> tuple[Stacker, dict]:
     `train_regime_stack`.
     """
     from sklearn.linear_model import LogisticRegression
-    from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import roc_auc_score
+    from sklearn.preprocessing import StandardScaler
 
     X = feats[FEATURES].values.astype(float)
     n = len(X)
@@ -165,6 +173,7 @@ def train_stack(feats: pd.DataFrame, y: np.ndarray) -> tuple[Stacker, dict]:
 def _make_meta_learner():
     """The stack's meta-learner: a small L2 logistic over the (few, dense) base signals."""
     from sklearn.linear_model import LogisticRegression
+
     return LogisticRegression(C=1.0, max_iter=1000)
 
 
@@ -175,13 +184,22 @@ def make_base2():
     collinear feature panel. Its job is to be DECORRELATED from the XGBoost primary (corr ≈ 0.42 on
     the OOF panel), not to win on its own — that decorrelation is what lets the stack add AUC.
     """
+    from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
-    from sklearn.linear_model import LogisticRegression
+
     return make_pipeline(
         StandardScaler(),
-        LogisticRegression(penalty="elasticnet", solver="saga", l1_ratio=0.5,
-                           C=0.5, max_iter=2000, tol=1e-3, n_jobs=-1, random_state=42),
+        LogisticRegression(
+            penalty="elasticnet",
+            solver="saga",
+            l1_ratio=0.5,
+            C=0.5,
+            max_iter=2000,
+            tol=1e-3,
+            n_jobs=-1,
+            random_state=42,
+        ),
     )
 
 
@@ -191,8 +209,8 @@ def oof_base2(X, y, w, t1, feat_cols) -> np.ndarray:
     primary, so its `p2_base` column lines up with `primary_cal` row-for-row (no peek).
     Returns a full-length array aligned to X (NaN where a row was never OOF-tested).
     """
-    from backend.prediction.train import N_SPLITS, EMBARGO
     from backend.prediction.cv import PurgedWalkForwardSplit
+    from backend.prediction.train import EMBARGO, N_SPLITS
 
     cv = PurgedWalkForwardSplit(n_splits=N_SPLITS, embargo=EMBARGO)
     oof = np.full(len(y), np.nan)
@@ -222,14 +240,23 @@ class RegimeStacker:
     blend robust to the distribution shift that wrecked the un-anchored variants out-of-sample.
     """
 
-    def __init__(self, experts: dict, global_model, scaler, features=BASE_SIGNALS,
-                 primary_blend: float = PRIMARY_BLEND, use_experts: bool = False,
-                 report: dict | None = None):
-        self.experts = experts                      # {regime: fitted logistic}
+    def __init__(
+        self,
+        experts: dict,
+        global_model,
+        scaler,
+        features=BASE_SIGNALS,
+        primary_blend: float = PRIMARY_BLEND,
+        use_experts: bool = False,
+        report: dict | None = None,
+    ):
+        self.experts = experts  # {regime: fitted logistic}
         self.global_model = global_model
         self.scaler = scaler
-        self.features = list(features)              # base-signal design matrix
-        self.primary_blend = float(primary_blend)  # weight on the calibrated primary (shrink anchor)
+        self.features = list(features)  # base-signal design matrix
+        self.primary_blend = float(
+            primary_blend
+        )  # weight on the calibrated primary (shrink anchor)
         self.use_experts = bool(use_experts)
         self.report = report or {}
 
@@ -243,8 +270,11 @@ class RegimeStacker:
             wj = np.clip(regime_probs[:, j], 0.0, None)
             preds += wj * pr
             wsum += wj
-        return np.where(wsum > 1e-9, preds / np.where(wsum > 1e-9, wsum, 1.0),
-                        self.global_model.predict_proba(Xs)[:, 1])
+        return np.where(
+            wsum > 1e-9,
+            preds / np.where(wsum > 1e-9, wsum, 1.0),
+            self.global_model.predict_proba(Xs)[:, 1],
+        )
 
     def _blend(self, stack_p: np.ndarray, primary_cal: np.ndarray) -> np.ndarray:
         b = self.primary_blend
@@ -270,23 +300,44 @@ class RegimeStacker:
 
     def save(self, path: str | Path) -> None:
         import joblib
-        joblib.dump({"experts": self.experts, "global_model": self.global_model,
-                     "scaler": self.scaler, "features": self.features,
-                     "primary_blend": self.primary_blend, "use_experts": self.use_experts,
-                     "report": self.report}, path)
+
+        joblib.dump(
+            {
+                "experts": self.experts,
+                "global_model": self.global_model,
+                "scaler": self.scaler,
+                "features": self.features,
+                "primary_blend": self.primary_blend,
+                "use_experts": self.use_experts,
+                "report": self.report,
+            },
+            path,
+        )
 
     @classmethod
-    def load(cls, path: str | Path) -> "RegimeStacker":
+    def load(cls, path: str | Path) -> RegimeStacker:
         # Local, trusted artifacts only (joblib/pickle == RCE if untrusted). Never load uploads.
         import joblib
+
         d = joblib.load(path)
-        return cls(d["experts"], d["global_model"], d["scaler"], d.get("features", BASE_SIGNALS),
-                   d.get("primary_blend", PRIMARY_BLEND), d.get("use_experts", False),
-                   d.get("report", {}))
+        return cls(
+            d["experts"],
+            d["global_model"],
+            d["scaler"],
+            d.get("features", BASE_SIGNALS),
+            d.get("primary_blend", PRIMARY_BLEND),
+            d.get("use_experts", False),
+            d.get("report", {}),
+        )
 
 
-def _fit_experts(Xs: np.ndarray, y: np.ndarray, regime_label: np.ndarray,
-                 global_model, min_rows: int = MIN_REGIME_ROWS) -> dict:
+def _fit_experts(
+    Xs: np.ndarray,
+    y: np.ndarray,
+    regime_label: np.ndarray,
+    global_model,
+    min_rows: int = MIN_REGIME_ROWS,
+) -> dict:
     """Fit one logistic per regime on its rows; fall back to the global model if too few / one-class."""
     experts = {}
     for r in REGIMES:
@@ -298,9 +349,12 @@ def _fit_experts(Xs: np.ndarray, y: np.ndarray, regime_label: np.ndarray,
     return experts
 
 
-def train_regime_stack(feats: pd.DataFrame, y: np.ndarray,
-                       min_rows: int = MIN_REGIME_ROWS,
-                       primary_blend: float = PRIMARY_BLEND) -> tuple[RegimeStacker, dict]:
+def train_regime_stack(
+    feats: pd.DataFrame,
+    y: np.ndarray,
+    min_rows: int = MIN_REGIME_ROWS,
+    primary_blend: float = PRIMARY_BLEND,
+) -> tuple[RegimeStacker, dict]:
     """
     Fit the stack on the EARLY 70% of OOF rows, evaluate on the LATER 30%, and DATA-DRIVE the two
     regime choices honestly:
@@ -329,8 +383,9 @@ def train_regime_stack(feats: pd.DataFrame, y: np.ndarray,
     Xs = scaler.transform(X)
     glob_eval = _make_meta_learner().fit(Xs[:cut], y[:cut])
     experts_eval = _fit_experts(Xs[:cut], y[:cut], rlabel[:cut], glob_eval, min_rows)
-    moe_eval = RegimeStacker(experts_eval, glob_eval, scaler, BASE_SIGNALS,
-                             primary_blend=0.0, use_experts=True)
+    moe_eval = RegimeStacker(
+        experts_eval, glob_eval, scaler, BASE_SIGNALS, primary_blend=0.0, use_experts=True
+    )
 
     p_global = glob_eval.predict_proba(Xs[cut:])[:, 1]
     p_moe = moe_eval._stack_raw(Xs[cut:], rp[cut:])
@@ -395,11 +450,15 @@ def train_regime_stack(feats: pd.DataFrame, y: np.ndarray,
     scaler_full = StandardScaler().fit(X)
     Xs_full = scaler_full.transform(X)
     glob_full = _make_meta_learner().fit(Xs_full, y)
-    experts_full = (_fit_experts(Xs_full, y, rlabel, glob_full, min_rows)
-                    if use_experts else {r: glob_full for r in REGIMES})
+    experts_full = (
+        _fit_experts(Xs_full, y, rlabel, glob_full, min_rows)
+        if use_experts
+        else {r: glob_full for r in REGIMES}
+    )
     report["coef"] = dict(zip(BASE_SIGNALS, np.round(glob_full.coef_[0], 4).tolist()))
-    return RegimeStacker(experts_full, glob_full, scaler_full, BASE_SIGNALS,
-                         primary_blend, use_experts, report), report
+    return RegimeStacker(
+        experts_full, glob_full, scaler_full, BASE_SIGNALS, primary_blend, use_experts, report
+    ), report
 
 
 # ══════════════════════════════════════════════════════════════════════════════════
@@ -412,10 +471,15 @@ async def _assemble_oof():
     full feature matrix needed to refit the serving base-2 learner.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from backend.prediction.train import (load_dataset, generate_oof_signals,
-                                           _make_regressor, N_SPLITS, EMBARGO)
     from backend.prediction.cv import PurgedWalkForwardSplit
     from backend.prediction.regime import decode_regimes
+    from backend.prediction.train import (
+        EMBARGO,
+        N_SPLITS,
+        _make_regressor,
+        generate_oof_signals,
+        load_dataset,
+    )
 
     X, y, w, t1, feat_cols, fd_orders, data = await load_dataset()
     primary_cal, meta_full, _iso, _mrep = generate_oof_signals(X, y, w, t1, feat_cols)
@@ -443,11 +507,25 @@ async def _assemble_oof():
     p_ch = rd["p_chop"].fillna(1 / 3).values
     p_ro = rd["p_risk_off"].fillna(1 / 3).values
 
-    df = pd.DataFrame({
-        "primary_cal": primary_cal, "p2_base": p2, "meta_prob": meta_full,
-        "mag_oof": mag, "p_trend": p_tr, "p_chop": p_ch, "p_risk_off": p_ro,
-        "regime": regime_label, "_date": dates, "_y": y,
-    }).dropna(subset=OOF_COLS + ["_y"]).sort_values("_date").reset_index(drop=True)
+    df = (
+        pd.DataFrame(
+            {
+                "primary_cal": primary_cal,
+                "p2_base": p2,
+                "meta_prob": meta_full,
+                "mag_oof": mag,
+                "p_trend": p_tr,
+                "p_chop": p_ch,
+                "p_risk_off": p_ro,
+                "regime": regime_label,
+                "_date": dates,
+                "_y": y,
+            }
+        )
+        .dropna(subset=OOF_COLS + ["_y"])
+        .sort_values("_date")
+        .reset_index(drop=True)
+    )
 
     ctx = {"X": X, "y": y, "w": w, "feat_cols": feat_cols}
     return df, df["_y"].values.astype(int), ctx
@@ -456,11 +534,14 @@ async def _assemble_oof():
 async def fit_and_save() -> dict:
     """Offline entrypoint: train the regime stack on OOF signals, persist regime_stack.pkl + base2.pkl."""
     import joblib
+
     t0 = time.time()
     print("Assembling OOF base signals (primary + base2 + meta + magnitude + regime posteriors)...")
     feats, y, ctx = await _assemble_oof()
-    print(f"Stack training rows: {len(feats):,}  "
-          f"(regime mix: {pd.Series(feats['regime']).value_counts().to_dict()})")
+    print(
+        f"Stack training rows: {len(feats):,}  "
+        f"(regime mix: {pd.Series(feats['regime']).value_counts().to_dict()})"
+    )
 
     stacker, rep = train_regime_stack(feats, y)
     stacker.save(MODELS_DIR / "regime_stack.pkl")
@@ -468,37 +549,46 @@ async def fit_and_save() -> dict:
     # Persist the serving base-2 learner (refit on ALL data) so predict.py can produce p2_base live.
     print("Refitting serving base-2 learner on all data...")
     base2 = make_base2()
-    base2.fit(ctx["X"][ctx["feat_cols"]], ctx["y"],
-              logisticregression__sample_weight=ctx["w"])
-    joblib.dump({"model": base2, "feature_columns": ctx["feat_cols"]},
-                MODELS_DIR / "base2.pkl")
+    base2.fit(ctx["X"][ctx["feat_cols"]], ctx["y"], logisticregression__sample_weight=ctx["w"])
+    joblib.dump({"model": base2, "feature_columns": ctx["feat_cols"]}, MODELS_DIR / "base2.pkl")
 
     print("\nRegime-conditional stack (time-split OOS eval):")
-    print(f"  base learners : primary {rep['primary_auc']:.4f}  |  base2(EN) {rep['p2_auc']:.4f}  "
-          f"(corr {rep['p2_corr_primary']:.3f})  -> best base = {rep['best_base_name']} "
-          f"{rep['best_base_auc']:.4f}")
-    print(f"  shipped stack : {rep['stack_auc']:.4f}   (unshrunk {rep['stack_unshrunk_auc']:.4f}, "
-          f"blend->primary {rep['primary_blend']:.2f})  lift vs best base {rep['lift_vs_best_base']:+.4f}")
-    print(f"  regime ablation: global {rep['global_stack_auc']:.4f}  |  MoE {rep['moe_stack_auc']:.4f}  "
-          f"|  +regime-as-feature {rep['regime_feature_stack_auc']:.4f}  "
-          f"-> use_experts={rep['use_experts']}")
+    print(
+        f"  base learners : primary {rep['primary_auc']:.4f}  |  base2(EN) {rep['p2_auc']:.4f}  "
+        f"(corr {rep['p2_corr_primary']:.3f})  -> best base = {rep['best_base_name']} "
+        f"{rep['best_base_auc']:.4f}"
+    )
+    print(
+        f"  shipped stack : {rep['stack_auc']:.4f}   (unshrunk {rep['stack_unshrunk_auc']:.4f}, "
+        f"blend->primary {rep['primary_blend']:.2f})  lift vs best base {rep['lift_vs_best_base']:+.4f}"
+    )
+    print(
+        f"  regime ablation: global {rep['global_stack_auc']:.4f}  |  MoE {rep['moe_stack_auc']:.4f}  "
+        f"|  +regime-as-feature {rep['regime_feature_stack_auc']:.4f}  "
+        f"-> use_experts={rep['use_experts']}"
+    )
     print(f"  ACC  : stack {rep['stack_acc']:.4f}  vs primary {rep['primary_acc']:.4f}")
     print(f"  ECE  : stack {rep['stack_ece']:.4f}  vs primary {rep['primary_ece']:.4f}")
-    print(f"  per-regime held-out AUC (stack vs primary):")
+    print("  per-regime held-out AUC (stack vs primary):")
     for r in REGIMES:
         pr = rep["per_regime"][r]
         if pr["stack_auc"] is not None:
-            print(f"      {r:9} n={pr['n']:>6,}  stack {pr['stack_auc']:.4f}  primary {pr['primary_auc']:.4f}")
+            print(
+                f"      {r:9} n={pr['n']:>6,}  stack {pr['stack_auc']:.4f}  primary {pr['primary_auc']:.4f}"
+            )
         else:
             print(f"      {r:9} n={pr['n']:>6,}  (too few to score)")
-    verdict = ("PASS — stack beats the best base learner; ENABLED at serving (self-gate clears)"
-               if rep["gate6_pass"] else
-               "FAIL — no lift over best base learner; stays self-gated OFF (honesty contract)")
+    verdict = (
+        "PASS — stack beats the best base learner; ENABLED at serving (self-gate clears)"
+        if rep["gate6_pass"]
+        else "FAIL — no lift over best base learner; stays self-gated OFF (honesty contract)"
+    )
     print(f"\n  GATE-6 (stack AUC > best single base learner): {verdict}")
-    print(f"  saved: regime_stack.pkl, base2.pkl  ({time.time()-t0:.1f}s)")
+    print(f"  saved: regime_stack.pkl, base2.pkl  ({time.time() - t0:.1f}s)")
     return rep
 
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(fit_and_save())

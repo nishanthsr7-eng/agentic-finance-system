@@ -9,8 +9,12 @@ Writes Dataset/coinmetrics/onchain.csv (long format: time, asset, <metrics>).
 Metrics: AdrActCnt (active addresses), TxCnt (tx count), FeeTotUSD (fees), SplyCur (supply).
 Catalog: https://docs.coinmetrics.io/api/v4
 """
+
 from __future__ import annotations
-import argparse, sys, time
+
+import argparse
+import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -19,15 +23,34 @@ import requests
 BASE = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
 OUT = Path(__file__).resolve().parents[1] / "Dataset" / "coinmetrics"
 # our crypto universe as Coin Metrics asset ids (lowercase); some altcoins may be unsupported -> skipped
-ASSETS = ["btc", "eth", "bnb", "sol", "xrp", "ada", "avax", "dot",
-          "link", "ltc", "trx", "uni", "doge", "shib"]
+ASSETS = [
+    "btc",
+    "eth",
+    "bnb",
+    "sol",
+    "xrp",
+    "ada",
+    "avax",
+    "dot",
+    "link",
+    "ltc",
+    "trx",
+    "uni",
+    "doge",
+    "shib",
+]
 
 
 def _fetch(asset: str, metrics: list[str]) -> list[dict] | None:
     """Paginated fetch for ONE asset. Returns None if the combo is forbidden (so caller retries)."""
     rows, token = [], None
     while True:
-        params = {"assets": asset, "metrics": ",".join(metrics), "frequency": "1d", "page_size": 10000}
+        params = {
+            "assets": asset,
+            "metrics": ",".join(metrics),
+            "frequency": "1d",
+            "page_size": 10000,
+        }
         if token:
             params["next_page_token"] = token
         r = requests.get(BASE, params=params, timeout=60).json()
@@ -53,14 +76,16 @@ def fetch(assets: list[str], metrics: list[str]) -> pd.DataFrame:
                 if rws:
                     rows += rws
         if not rows:
-            print(f"  {a:5}: no community data"); continue
+            print(f"  {a:5}: no community data")
+            continue
         got = set()
         for r in rows:
             key = (r["asset"], r["time"])
             d = acc.setdefault(key, {"asset": r["asset"], "time": r["time"]})
             for k, v in r.items():
                 if k not in ("asset", "time"):
-                    d[k] = v; got.add(k)
+                    d[k] = v
+                    got.add(k)
         print(f"  {a:5}: {len(rows):>5} rows, metrics {sorted(got)}")
     return pd.DataFrame(list(acc.values()))
 
@@ -77,8 +102,10 @@ def main():
     print(f"Coin Metrics community -> {OUT}  ({len(assets)} assets, {len(metrics)} metrics)")
     df = fetch(assets, metrics)
     if df.empty:
-        print("  no data returned"); return 0
-    fp = OUT / "onchain.csv"; df.to_csv(fp, index=False)
+        print("  no data returned")
+        return 0
+    fp = OUT / "onchain.csv"
+    df.to_csv(fp, index=False)
     got = sorted(df["asset"].unique()) if "asset" in df else []
     missing = [x for x in assets if x not in got]
     print(f"  {len(df)} rows, assets covered: {got}")

@@ -79,18 +79,29 @@ log = logging.getLogger("flux.prediction.crypto_features")
 
 CRYPTO_FEATURE_COLS = [
     # funding (perpetual-swap carry / crowding)
-    "fund_level", "fund_z20", "fund_sign_flips", "fund_cum8",
+    "fund_level",
+    "fund_z20",
+    "fund_sign_flips",
+    "fund_cum8",
     # open interest (position build-up vs churn)
-    "oi_chg", "oi_to_vol", "oi_z",
+    "oi_chg",
+    "oi_to_vol",
+    "oi_z",
     # DVOL (crypto implied-vol index — BTC/ETH only)
-    "dvol_level", "dvol_chg",
+    "dvol_level",
+    "dvol_chg",
     # on-chain (valuation & network activity)
-    "nvt", "addr_growth", "tx_growth",
+    "nvt",
+    "addr_growth",
+    "tx_growth",
     # market-wide (regime + BTC beta)
-    "fng", "btc_lead_lag",
+    "fng",
+    "btc_lead_lag",
 ]
 
-_CLIP = 1.0  # clamp ratio/return-style features to ±100% so a single bad print can't dominate a split
+_CLIP = (
+    1.0  # clamp ratio/return-style features to ±100% so a single bad print can't dominate a split
+)
 
 
 # ── Cached raw panels (read each source file ONCE, then slice per symbol) ─────────
@@ -148,29 +159,31 @@ def _funding_feats(f: pd.DataFrame) -> pd.DataFrame:
     """funding panel [funding, funding_last] -> fund_level, fund_z20, fund_sign_flips, fund_cum8."""
     out = pd.DataFrame(index=f.index)
     funding = f["funding"]
-    out["fund_level"] = f["funding_last"]                     # level going into the next day
-    out["fund_z20"] = _z(funding, 20, 10)                     # is today's carry unusually rich/cheap?
+    out["fund_level"] = f["funding_last"]  # level going into the next day
+    out["fund_z20"] = _z(funding, 20, 10)  # is today's carry unusually rich/cheap?
     sign = np.sign(funding)
     flip = (sign != sign.shift()) & sign.shift().notna() & (sign != 0)
-    out["fund_sign_flips"] = flip.rolling(8, min_periods=1).sum()   # regime churn over ~8 days
-    out["fund_cum8"] = funding.rolling(8, min_periods=1).sum()      # cumulative 8-day carry
+    out["fund_sign_flips"] = flip.rolling(8, min_periods=1).sum()  # regime churn over ~8 days
+    out["fund_cum8"] = funding.rolling(8, min_periods=1).sum()  # cumulative 8-day carry
     return out
 
 
 def _oi_feats(oi: pd.DataFrame, dollar_vol: pd.Series) -> pd.DataFrame:
     """OI panel [oi, oi_value, ...] + traded $-volume -> oi_chg, oi_to_vol, oi_z."""
     out = pd.DataFrame(index=oi.index)
-    out["oi_chg"] = oi["oi"].pct_change().clip(-_CLIP, _CLIP)       # day-over-day position growth
+    out["oi_chg"] = oi["oi"].pct_change().clip(-_CLIP, _CLIP)  # day-over-day position growth
     dv = dollar_vol.reindex(oi.index)
-    out["oi_to_vol"] = (oi["oi_value"] / dv.replace(0, np.nan)).clip(0, 50)  # open positions vs turnover
-    out["oi_z"] = _z(oi["oi"], 20, 10)                             # OI extension vs trailing norm
+    out["oi_to_vol"] = (oi["oi_value"] / dv.replace(0, np.nan)).clip(
+        0, 50
+    )  # open positions vs turnover
+    out["oi_z"] = _z(oi["oi"], 20, 10)  # OI extension vs trailing norm
     return out
 
 
 def _dvol_feats(d: pd.DataFrame) -> pd.DataFrame:
     """DVOL panel [dvol, dvol_open] -> dvol_level (as a fraction), dvol_chg (log)."""
     out = pd.DataFrame(index=d.index)
-    out["dvol_level"] = d["dvol"] / 100.0                          # % -> fraction (keep scale modest)
+    out["dvol_level"] = d["dvol"] / 100.0  # % -> fraction (keep scale modest)
     out["dvol_chg"] = np.log(d["dvol"] / d["dvol"].shift()).clip(-_CLIP, _CLIP)
     return out
 
@@ -194,8 +207,9 @@ def _onchain_feats(c: pd.DataFrame) -> pd.DataFrame:
 
 
 # ── Assembly ─────────────────────────────────────────────────────────────────────
-def compute_crypto_features(symbol: str, price: pd.DataFrame,
-                            btc_ret: pd.Series | None = None) -> pd.DataFrame:
+def compute_crypto_features(
+    symbol: str, price: pd.DataFrame, btc_ret: pd.Series | None = None
+) -> pd.DataFrame:
     """
     Crypto-native features aligned to ``price.index`` (a per-symbol DatetimeIndex).
 
@@ -217,7 +231,7 @@ def compute_crypto_features(symbol: str, price: pd.DataFrame,
     idx = pd.DatetimeIndex(pd.to_datetime(price.index))
     sym = symbol.upper()
     if sym not in CRYPTO_SYMBOLS:
-        return out                                            # non-crypto -> all neutral
+        return out  # non-crypto -> all neutral
 
     blocks: list[pd.DataFrame] = []
 
@@ -263,21 +277,25 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
-        from backend.db import init_db, get_history
+        from backend.db import get_history, init_db
         from backend.prediction.features import build_features_from_df, calibrate_fd_order
+
         await init_db()
 
         brows = await get_history("BTC")
-        b = pd.DataFrame(brows); b.index = pd.to_datetime(b["date"])
+        b = pd.DataFrame(brows)
+        b.index = pd.to_datetime(b["date"])
         btc_ret = np.log(b["adj_close"].astype(float)).diff()
 
         for sym in ("BTC", "ETH", "SOL", "AAPL"):
             rows = await get_history(sym)
             if not rows:
-                print(f"  {sym:5} no history"); continue
+                print(f"  {sym:5} no history")
+                continue
             df = pd.DataFrame(rows)
             d = calibrate_fd_order(pd.Series(df["adj_close"].astype(float).values[: len(df) // 2]))
             feat = build_features_from_df(df, fd_order=d)
@@ -287,10 +305,14 @@ if __name__ == "__main__":
             assert cf.index.equals(feat.index), "index misalignment"
             assert np.isfinite(cf.values).all(), "non-finite crypto feature"
             tail = cf.iloc[-1]
-            print(f"  {sym:5} active={len(active):>2}/{len(CRYPTO_FEATURE_COLS)}  "
-                  f"fund_level={tail['fund_level']:+.5f} oi_z={tail['oi_z']:+.2f} "
-                  f"dvol={tail['dvol_level']:.3f} nvt={tail['nvt']:+.2f} "
-                  f"fng={tail['fng']:+.2f} btc_ll={tail['btc_lead_lag']:+.4f}")
-        print("OK — equities return an all-zero (neutral) block; crypto rows are populated & finite.")
+            print(
+                f"  {sym:5} active={len(active):>2}/{len(CRYPTO_FEATURE_COLS)}  "
+                f"fund_level={tail['fund_level']:+.5f} oi_z={tail['oi_z']:+.2f} "
+                f"dvol={tail['dvol_level']:.3f} nvt={tail['nvt']:+.2f} "
+                f"fng={tail['fng']:+.2f} btc_ll={tail['btc_lead_lag']:+.4f}"
+            )
+        print(
+            "OK — equities return an all-zero (neutral) block; crypto rows are populated & finite."
+        )
 
     asyncio.run(_demo())

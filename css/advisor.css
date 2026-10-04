@@ -194,7 +194,7 @@ body { font-family: var(--F); }
 
 /* ════════ CONTAINER 2: SIGNAL STRIP ════════ */
 .signal-strip {
-  display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
   flex-shrink: 0; background: var(--BD);
   border-top: 1px solid var(--BD);
 }
@@ -227,6 +227,27 @@ body { font-family: var(--F); }
 .sig-vf-tag.agree { color: var(--A); background: var(--A08); }
 .sig-vf-tag.downgrade { color: var(--AMB); background: rgba(245,166,35,.08); }
 .sig-vf-tag.veto { color: var(--RED); background: rgba(255,77,77,.08); }
+
+/* ════════ 5-DAY OUTLOOK (price range) ════════ */
+.outlook {
+  flex-shrink: 0; padding: 10px 14px 12px;
+  background: rgba(12,12,14,.85); border-top: 1px solid var(--BD);
+}
+.ol-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.ol-title { font-size: 8.5px; font-weight: 700; color: var(--T3); text-transform: uppercase; letter-spacing: 1px; }
+.ol-meta { font-family: var(--M); font-size: 9px; color: var(--T2); text-align: right; }
+.ol-levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ol-lvl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ol-lvl-lbl { font-size: 8.5px; color: var(--T3); text-transform: uppercase; letter-spacing: .5px; }
+.ol-lvl-val { font-family: var(--M); font-size: 15px; font-weight: 700; color: var(--W); white-space: nowrap; }
+.ol-lvl-val small { font-size: 10px; font-weight: 600; color: var(--T2); margin-left: 4px; }
+.ol-lvl.muted .ol-lvl-val { color: var(--T2); font-weight: 600; }
+.ol-lvl-sub { font-family: var(--M); font-size: 9px; color: var(--T3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ol-bar { position: relative; height: 6px; margin: 12px 0 4px; border-radius: 3px; background: rgba(255,255,255,.06); }
+.ol-bar-80 { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--A15); border: 1px solid var(--A); }
+.ol-bar-now { position: absolute; top: -4px; width: 2px; height: 14px; margin-left: -1px; background: var(--W); border-radius: 1px; }
+.ol-bar-ends { display: flex; justify-content: space-between; font-family: var(--M); font-size: 8.5px; color: var(--T3); }
+.ol-note { font-size: 9.5px; color: var(--T2); margin-top: 6px; line-height: 1.4; }
 
 /* ════════ BOTTOM ROW: 3 MINI PANELS ════════ */
 .bottom-row {
@@ -462,6 +483,7 @@ body { font-family: var(--F); }
 }
 @media (max-width: 760px) {
   .bottom-row { grid-template-columns: 1fr; }
-  .signal-strip { grid-template-columns: repeat(3, 1fr); }
+  .signal-strip { grid-template-columns: repeat(2, 1fr); }
+  .ol-levels { grid-template-columns: 1fr; }
   .dash-body { padding: 16px !important; }
 }

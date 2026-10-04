@@ -8,7 +8,7 @@
   const API = window.FLUX_API || 'http://localhost:8000';
 
   // Assets whose live candles /market/candles can serve (yfinance-backed).
-  const CHARTABLE = { BTC: 'btc', ETH: 'eth', NIFTY: 'nifty' };
+  const CHARTABLE = { BTC: 'btc', ETH: 'eth' };
 
   // Crypto labels in the training universe — used to set asset_type on paper trades.
   const CRYPTO_LABELS = new Set(['BTC','ETH','USDT','BNB','SOL','XRP','DOGE','ADA','AVAX','DOT','LINK','UNI','LTC','SHIB','TRX']);
@@ -22,6 +22,7 @@
     live: false,       // candle feed healthy?
     lineMode: false,   // true when no candles (non-chartable symbol → forecast line)
     verdict: null,     // /predict/{sym}/verdict .verdict — latest verifier verdict, if any
+    pointForecast: null, // /predict/{sym}/forecast .point_forecast — OOF skill of the point estimate
   };
 
   const $ = (id) => document.getElementById(id);
@@ -78,7 +79,11 @@
     $('chart-svg').setAttribute('preserveAspectRatio', 'none');
   }
 
+  // The point estimate is only promoted when the shipped return model beat "no change" out of fold.
+  function pointHasSkill() { return !!(state.pointForecast && state.pointForecast.has_skill); }
+
   // Build the re-based forecast geometry from the live anchor price.
+  // The range is a RETURN range, so it follows the live price rather than the model's last close.
   function rebasedForecast(anchor) {
     const p = state.prediction;
     if (!p || anchor == null || !isFinite(anchor)) return null;
@@ -87,10 +92,13 @@
     const predFrac = p.pred_return != null ? (1 + p.pred_return) : (p.pred_price / base);
     const lowFrac = p.conf_low != null ? p.conf_low / base : predFrac;
     const highFrac = p.conf_high != null ? p.conf_high / base : predFrac;
+    const has90 = p.conf_low_90 != null && p.conf_high_90 != null;
     return {
       projected: anchor * predFrac,
       bandLow: anchor * lowFrac,
       bandHigh: anchor * highFrac,
+      band90Low: has90 ? anchor * (p.conf_low_90 / base) : null,
+      band90High: has90 ? anchor * (p.conf_high_90 / base) : null,
       deltaPct: (predFrac - 1) * 100,
       up: p.direction !== 'DOWN',
     };
@@ -125,17 +133,8 @@
     lo -= range0 * 0.06; hi += range0 * 0.06;
     if (fc) { [fc.projected, anchor].forEach(v => { lo = Math.min(lo, v); hi = Math.max(hi, v); }); }
 
-    // The conformal band can be far wider than the recent price action on
-    // low-confidence calls — cap how much it's allowed to stretch the axis so the
-    // price line never gets crushed. The clipped edge gets a chevron + true value.
-    let bandLo = fc ? fc.bandLow : null, bandHi = fc ? fc.bandHigh : null;
-    let bandClippedLo = false, bandClippedHi = false;
-    if (fc) {
-      const cap = (hi - lo) * 1.6;
-      if (hi - bandLo > cap) { bandLo = hi - cap; bandClippedLo = true; }
-      if (bandHi - lo > cap) { bandHi = lo + cap; bandClippedHi = true; }
-      lo = Math.min(lo, bandLo); hi = Math.max(hi, bandHi);
-    }
+    // The price range is shown in the 5-day outlook panel below the chart, not as a cone:
+    // it is often far wider than recent price action and would crush the price line.
     const range = hi - lo || 1;
     const py = v => PAD.t + ph - ((v - lo) / range) * ph;
     const N = src.length;
@@ -177,15 +176,11 @@
 
     // ── Forecast zone (re-based) ──
     if (fc) {
-      const yA = py(anchor), yP = py(fc.projected), yHi = py(bandHi), yLo = py(bandLo);
-      const col = fc.up ? UP : DOWN;
+      const yA = py(anchor), yP = py(fc.projected);
+      // muted unless the point estimate has out-of-fold skill over "no change"
+      const col = pointHasSkill() ? (fc.up ? UP : DOWN) : 'rgba(255,255,255,.45)';
       // shaded forecast-zone background
       out += `<rect x="${xNow.toFixed(1)}" y="${PAD.t}" width="${(xEnd - xNow).toFixed(1)}" height="${ph.toFixed(1)}" fill="rgba(255,255,255,.015)"/>`;
-      // conformal cone widening from now → horizon (clipped to the visible axis)
-      out += `<path d="M ${xNow.toFixed(1)},${yA.toFixed(1)} L ${xEnd.toFixed(1)},${yHi.toFixed(1)} L ${xEnd.toFixed(1)},${yLo.toFixed(1)} Z" fill="${col}" fill-opacity=".12"/>`;
-      // chevrons (left edge of the forecast zone) where the true band runs off-axis
-      if (bandClippedHi) out += `<text x="${(xNow + 4).toFixed(1)}" y="${(PAD.t + 9).toFixed(1)}" fill="${col}" font-size="9" font-weight="700" font-family="'JetBrains Mono',monospace" text-anchor="start" opacity=".75">▲ band to ${fmtPrice(fc.bandHigh)}</text>`;
-      if (bandClippedLo) out += `<text x="${(xNow + 4).toFixed(1)}" y="${(PAD.t + ph - 4).toFixed(1)}" fill="${col}" font-size="9" font-weight="700" font-family="'JetBrains Mono',monospace" text-anchor="start" opacity=".75">▼ band to ${fmtPrice(fc.bandLow)}</text>`;
       // now divider
       out += `<line x1="${xNow.toFixed(1)}" y1="${PAD.t}" x2="${xNow.toFixed(1)}" y2="${(PAD.t + ph).toFixed(1)}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="2 3"/>`;
       // flat current-price reference across the zone
@@ -335,8 +330,9 @@
       const d = await getJSON(`${API}/predict/${state.symbol}/forecast?lookback=60`);
       state.prediction = d.prediction || null;
       state.series = d.series || [];
+      state.pointForecast = d.point_forecast || null;
       return true;
-    } catch (e) { state.prediction = null; state.series = []; return false; }
+    } catch (e) { state.prediction = null; state.series = []; state.pointForecast = null; return false; }
   }
 
   // Latest verifier verdict for the active symbol, if the daily cycle has logged one.
@@ -450,9 +446,10 @@
 
     if (!p) {
       set('sig-dir', '—', 'sig-val neu');
-      ['sig-conf', 'sig-target', 'sig-band', 'sig-size', 'sig-regime'].forEach(id => set(id, '—', 'sig-val neu'));
-      set('sig-conf-sub', 'no model signal yet'); set('sig-target-sub', '—'); set('sig-size-sub', '—'); set('sig-sent', '—');
+      ['sig-conf', 'sig-size', 'sig-regime'].forEach(id => set(id, '—', 'sig-val neu'));
+      set('sig-conf-sub', 'no model signal yet'); set('sig-size-sub', '—'); set('sig-sent', '—');
       set('sig-asof', '—');
+      renderOutlook();
       return;
     }
 
@@ -483,22 +480,7 @@
       ? `base ${p.base_confidence}% → calibrated` : 'calibrated';
     set('sig-conf-sub', baseNote);
 
-    // Horizon label
-    if ($('sig-h')) $('sig-h').textContent = (p.horizon_days || 5) + 'd';
-
-    // Target (re-based to live)
-    if (fc) {
-      set('sig-target', fmtPrice(fc.projected), 'sig-val ' + col);
-      set('sig-target-sub', `${fmtPct(fc.deltaPct, 2)} from live`);
-    } else {
-      set('sig-target', fmtPrice(p.pred_price), 'sig-val ' + col);
-      set('sig-target-sub', fmtPct((p.pred_return || 0) * 100, 2));
-    }
-
-    // Band (re-based)
-    if ($('sig-band-pct')) $('sig-band-pct').textContent = p.band_pct || 80;
-    if (fc) set('sig-band', `${fmtPrice(fc.bandLow)} – ${fmtPrice(fc.bandHigh)}`, 'sig-val');
-    else set('sig-band', (p.conf_low != null && p.conf_high != null) ? `${fmtPrice(p.conf_low)} – ${fmtPrice(p.conf_high)}` : '—', 'sig-val');
+    renderOutlook();
 
     // Position size — honest about the meta act-gate.
     if (p.act) {
@@ -514,6 +496,67 @@
     const sl = p.sentiment_label || (p.sentiment != null ? (p.sentiment >= 0 ? 'positive' : 'negative') : null);
     const ss = p.sentiment != null ? ` ${p.sentiment >= 0 ? '+' : ''}${p.sentiment.toFixed(2)}` : '';
     set('sig-sent', sl ? `${sl}${ss}` : '—');
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     5-DAY OUTLOOK — the calibrated price range, re-based to live.
+     The range is the headline: its coverage is measured (80% / 90%
+     out of fold). The central estimate is shown muted, with its
+     average miss, until a retrain beats "no change".
+     ══════════════════════════════════════════════════════════════ */
+  function renderOutlook() {
+    const body = $('ol-body'), meta = $('ol-meta');
+    if (!body) return;
+    const p = state.prediction;
+    const anchor = liveAnchor();
+    const fc = p ? rebasedForecast(anchor) : null;
+    if ($('ol-h')) $('ol-h').textContent = p ? (p.horizon_days || 5) : 5;
+    if (!p || !fc || p.conf_low == null || p.conf_high == null) {
+      body.innerHTML = `<div class="ol-note">No price range for ${escapeHtml(state.symbol)} yet.</div>`;
+      if (meta) meta.textContent = '—';
+      return;
+    }
+    const pct = p.band_pct || 80;
+    const chg = v => fmtPct((v / anchor - 1) * 100, 1);
+    const skill = pointHasSkill();
+    const pf = state.pointForecast || {};
+    const miss = pf.mae != null ? `avg miss ±${(pf.mae * 100).toFixed(1)}%` : '';
+    if (meta) meta.textContent = `${pct}% range · by ${fmtDate(p.target_date)}`;
+
+    const has90 = fc.band90Low != null;
+    let html = `<div class="ol-levels">
+      <div class="ol-lvl">
+        <span class="ol-lvl-lbl">Low</span>
+        <span class="ol-lvl-val">${fmtPrice(fc.bandLow)}<small>${chg(fc.bandLow)}</small></span>
+        ${has90 ? `<span class="ol-lvl-sub">90%: ${fmtPrice(fc.band90Low)} (${chg(fc.band90Low)})</span>` : ''}
+      </div>
+      <div class="ol-lvl${skill ? '' : ' muted'}">
+        <span class="ol-lvl-lbl">Central estimate</span>
+        <span class="ol-lvl-val">${fmtPrice(fc.projected)}<small>${chg(fc.projected)}</small></span>
+        <span class="ol-lvl-sub">${skill ? miss : `not better than no-change${miss ? ' · ' + miss : ''}`}</span>
+      </div>
+      <div class="ol-lvl">
+        <span class="ol-lvl-lbl">High</span>
+        <span class="ol-lvl-val">${fmtPrice(fc.bandHigh)}<small>${chg(fc.bandHigh)}</small></span>
+        ${has90 ? `<span class="ol-lvl-sub">90%: ${fmtPrice(fc.band90High)} (${chg(fc.band90High)})</span>` : ''}
+      </div>
+    </div>`;
+
+    // Bar: the track spans the 90% range (or the 80% one padded), the inner block is the
+    // 80% range, the tick is the live price.
+    const lo = has90 ? fc.band90Low : fc.bandLow - (fc.bandHigh - fc.bandLow) * 0.15;
+    const hi = has90 ? fc.band90High : fc.bandHigh + (fc.bandHigh - fc.bandLow) * 0.15;
+    const span = hi - lo;
+    if (span > 0) {
+      const pos = v => Math.max(0, Math.min(100, (v - lo) / span * 100));
+      html += `<div class="ol-bar" title="${pct}% range (inner) within the 90% range (track); tick = live price">
+        <span class="ol-bar-80" style="left:${pos(fc.bandLow).toFixed(1)}%;right:${(100 - pos(fc.bandHigh)).toFixed(1)}%"></span>
+        <span class="ol-bar-now" style="left:${pos(anchor).toFixed(1)}%"></span>
+      </div>
+      <div class="ol-bar-ends"><span>${has90 ? '90% low' : ''}</span><span>live ${fmtPrice(anchor)}</span><span>${has90 ? '90% high' : ''}</span></div>`;
+    }
+    html += `<div class="ol-note">In ${pct}% of past cases, the price ${p.horizon_days || 5} trading days later was inside this range. That rate is an average over all predictions, not a promise for this one.</div>`;
+    body.innerHTML = html;
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -665,7 +708,7 @@
     const body = $('trust-body');
     const sym = state.symbol;
     let hist = null;
-    try { hist = await getJSON(`${API}/predict/${sym}/history?limit=40`); } catch (e) { hist = null; }
+    try { hist = await getJSON(`${API}/predict/${sym}/history?limit=100`); } catch (e) { hist = null; }
 
     const rows = (hist && hist.history) || [];
     const resolved = rows.filter(r => r.correct !== null && r.correct !== undefined);
@@ -676,6 +719,10 @@
       <span class="trust-acc-val">${acc != null ? acc + '%' : '—'}</span>
       <span class="trust-acc-lbl">${sym} hit rate</span>
     </div>`;
+    const bandHit = hist && hist.band_hit_rate != null ? Math.round(hist.band_hit_rate * 100) : null;
+    html += `<div class="trust-note">Range hit rate: ${bandHit != null
+      ? `<b style="color:var(--T1)">${bandHit}%</b> over the last ${hist.band_resolved} prediction${hist.band_resolved === 1 ? '' : 's'} (target ${state.prediction ? state.prediction.band_pct || 80 : 80}%)`
+      : 'pending, needs matured predictions'}</div>`;
     html += `<div class="trust-note">${rows.length} call${rows.length === 1 ? '' : 's'} logged · <b style="color:var(--T1)">${resolved.length}</b> resolved${acc == null ? ' — accuracy pending' : ''}</div>`;
 
     // Global calibration: real curve if we have data, else honest accumulating note.
@@ -741,12 +788,15 @@
     if (!p) return `No live model signal for ${state.symbol} right now.`;
     const anchor = liveAnchor();
     const fc = rebasedForecast(anchor);
-    const tgt = fc ? `${fmtPrice(fc.projected)} (${fmtPct(fc.deltaPct)})` : fmtPrice(p.pred_price);
+    const tgt = (fc ? `${fmtPrice(fc.projected)} (${fmtPct(fc.deltaPct)})` : fmtPrice(p.pred_price)) +
+      (pointHasSkill() ? '' : ' (central estimate, not better than assuming no change)');
     return [
       `LIVE AGENT SIGNAL — ${state.symbol}:`,
       `  Direction: ${p.direction} | Calibrated confidence: ${p.confidence}%${p.base_confidence != null ? ` (base ${p.base_confidence}%)` : ''}`,
       `  Live price: ${anchor != null ? fmtPrice(anchor) : 'n/a'} | ${p.horizon_days || 5}-day target: ${tgt}`,
-      `  ${p.band_pct || 80}% band: ${fc ? fmtPrice(fc.bandLow) + ' – ' + fmtPrice(fc.bandHigh) : 'n/a'}`,
+      `  ${p.band_pct || 80}% range: ${fc ? fmtPrice(fc.bandLow) + ' – ' + fmtPrice(fc.bandHigh) : 'n/a'}` +
+        (fc && fc.band90Low != null ? ` | 90% range: ${fmtPrice(fc.band90Low)} – ${fmtPrice(fc.band90High)}` : '') +
+        ' (historical coverage, not a promise)',
       `  Regime: ${p.regime || 'n/a'} | News sentiment: ${p.sentiment_label || 'n/a'} (${p.sentiment != null ? p.sentiment.toFixed(2) : 'n/a'})`,
       `  Meta act-gate: ${p.act ? `ACT (Kelly ${(p.kelly_frac * 100).toFixed(1)}%)` : 'NO-TRADE (conviction below action threshold)'}`,
     ].join('\n');

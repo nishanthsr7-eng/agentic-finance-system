@@ -53,7 +53,7 @@
       // into the next (possibly different) user's session.
       ['flux_user', 'flux_transactions', 'flux_accounts', 'flux_portfolio', 'flux_recurring',
        'flux_contacts', 'flux_protocols',
-       'flux_reward_states', 'flux_seeded'].forEach(k => localStorage.removeItem(k));
+       'flux_reward_states', 'flux_seeded', 'flux_sample_data'].forEach(k => localStorage.removeItem(k));
     },
   };
 
@@ -126,6 +126,42 @@
       },
     };
   })();
+
+  /* ── Sample-data badge ────────────────────────────────────────────────────
+   * js/seed.js fills localStorage with a hard-coded demo dataset when there is
+   * no session (anonymous / offline). On a cold start that dataset is on screen
+   * for up to a minute before the API answers, and it looks real. While it is
+   * the data being shown, say so. Removed on the first successful hydration.
+   */
+  const SampleBadge = {
+    show() {
+      if (localStorage.getItem('flux_sample_data') !== '1') return;
+      if (!document.body || document.getElementById('flux-sample-badge')) return;
+      const el = document.createElement('div');
+      el.id = 'flux-sample-badge';
+      el.setAttribute('role', 'status');
+      el.textContent = 'Showing sample data — API is waking up';
+      el.style.cssText = [
+        'position:fixed', 'left:50%', 'top:14px', 'transform:translateX(-50%)',
+        'z-index:9999', 'padding:6px 14px', 'border-radius:999px',
+        'background:#f59e0b', 'color:#111',
+        'font:600 12px/1.4 system-ui,-apple-system,sans-serif',
+        'box-shadow:0 4px 16px rgba(0,0,0,.25)', 'pointer-events:none',
+      ].join(';');
+      document.body.appendChild(el);
+    },
+    clear() {
+      localStorage.removeItem('flux_sample_data');
+      const n = document.getElementById('flux-sample-badge');
+      if (n) n.remove();
+    },
+  };
+  // seed.js loads after this file, so check once the page has parsed.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { if (!hydrated) SampleBadge.show(); });
+  } else {
+    setTimeout(() => { if (!hydrated) SampleBadge.show(); }, 0);
+  }
 
   const _origFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
@@ -249,6 +285,7 @@
 
       const firstSuccess = !hydrated;
       hydrated = true;
+      if (localStorage.getItem('flux_sample_data') === '1') { SampleBadge.clear(); changed = true; }
       retryDelay = 15000;
       // Refresh pages on data change OR on offline→online recovery, so widgets
       // that rendered an empty state while the backend was down repopulate.

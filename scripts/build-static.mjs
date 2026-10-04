@@ -27,7 +27,12 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DIST = join(ROOT, "dist");
 
 // Everything the browser actually requests. Anything not listed stays private.
-const INCLUDE = ["index.html", "css", "js", "pages", "assets"];
+const INCLUDE = [
+  "index.html", "css", "js", "pages", "assets",
+  // A root 404.html also switches off the Pages SPA fallback, so unknown
+  // paths (and these two files) stop returning the landing page with a 200.
+  "404.html", "robots.txt", "sitemap.xml",
+];
 
 // Cloudflare reads these from the output directory root.
 const HEADERS = `# Security headers for the static frontend. The API sends its own.

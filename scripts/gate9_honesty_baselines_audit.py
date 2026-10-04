@@ -37,6 +37,7 @@ Sections (hard pass/fail unless marked a reported caveat):
 
 Run:  python scripts/gate9_honesty_baselines_audit.py        (exit 0 = all pass, 1 = any hard failure)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -87,27 +88,33 @@ async def _main() -> int:
     majority = m["majority_acc"]
     arima_edge = m.get("arima_edge")
     arima_acc = m.get("arima_acc")
-    model_edge_drift = model_acc - majority            # FLUX-X primary edge-over-drift (full OOF)
+    model_edge_drift = model_acc - majority  # FLUX-X primary edge-over-drift (full OOF)
 
     # ── A. Naive baselines ───────────────────────────────────────────────────────
     print(f"\n[A] NAIVE BASELINES (full OOF, n={m['n_oof']:,})")
-    print(f"      FLUX-X acc {model_acc:.4f} | persistence {persistence:.4f} | "
-          f"always-up/majority {always_up:.4f}")
+    print(
+        f"      FLUX-X acc {model_acc:.4f} | persistence {persistence:.4f} | "
+        f"always-up/majority {always_up:.4f}"
+    )
 
     def a_beats_persistence():
         assert model_acc > persistence, f"model {model_acc:.4f} !> persistence {persistence:.4f}"
-        return f"FLUX-X {model_acc:.4f} > persistence {persistence:.4f} (+{model_acc-persistence:.4f})"
+        return f"FLUX-X {model_acc:.4f} > persistence {persistence:.4f} (+{model_acc - persistence:.4f})"
 
     def a_drift_note():
         # always-up == majority here (up-biased universe). They beat the model on RAW accuracy purely
         # by the up-drift and have AUC ≡ 0.5 (no ranking) → not tradeable. Decisive metric is C (AUC).
         assert abs(always_up - majority) < 1e-9, "always-up/majority should coincide (up-biased)"
-        _caveats.append(f"always-up {always_up:.4f} > model raw {model_acc:.4f} is pure up-drift "
-                        f"(AUC≡0.5, no ranking, no book) — see §C/§D for the real comparison")
+        _caveats.append(
+            f"always-up {always_up:.4f} > model raw {model_acc:.4f} is pure up-drift "
+            f"(AUC≡0.5, no ranking, no book) — see §C/§D for the real comparison"
+        )
         return f"always-up/majority {always_up:.4f} are drift, not skill (AUC≡0.5) → judged by AUC in C"
 
     _check("A1 FLUX-X beats persistence on raw OOF accuracy", a_beats_persistence)
-    _check("A2 always-up/majority are drift (no ranking skill), not a valid raw-acc bar", a_drift_note)
+    _check(
+        "A2 always-up/majority are drift (no ranking skill), not a valid raw-acc bar", a_drift_note
+    )
 
     # ── B. Foundation / classical (edge-over-drift) ──────────────────────────────
     print("\n[B] FOUNDATION / CLASSICAL BASELINES (compared on edge-over-drift)")
@@ -117,10 +124,12 @@ async def _main() -> int:
     def b_arima():
         assert arima_edge is not None, "ARIMA edge not stored in model_meta.json"
         if arima_edge > model_edge_drift:
-            _caveats.append(f"ARIMA(1,0,0) edge-over-drift {arima_edge:+.4f} ≥ FLUX-X primary "
-                            f"{model_edge_drift:+.4f}: raw 5-day SIGN is near the efficient-market "
-                            f"ceiling (§6). FLUX-X's edge is ranking/selectivity/Sharpe (§C/§D), "
-                            f"which ARIMA cannot produce.")
+            _caveats.append(
+                f"ARIMA(1,0,0) edge-over-drift {arima_edge:+.4f} ≥ FLUX-X primary "
+                f"{model_edge_drift:+.4f}: raw 5-day SIGN is near the efficient-market "
+                f"ceiling (§6). FLUX-X's edge is ranking/selectivity/Sharpe (§C/§D), "
+                f"which ARIMA cannot produce."
+            )
             verdict = "tie/edge to ARIMA on raw sign — EXPECTED ceiling (caveat, not a fail)"
         else:
             verdict = "FLUX-X edge-over-drift ≥ ARIMA"
@@ -130,11 +139,15 @@ async def _main() -> int:
     chronos_res = {"status": "skipped"}
     try:
         from backend.db import init_db
-        from backend.prediction.baselines import (chronos_directional_baseline,
-                                                   statsforecast_directional_baseline)
+        from backend.prediction.baselines import (
+            chronos_directional_baseline,
+            statsforecast_directional_baseline,
+        )
+
         await init_db()
-        chronos_res = await chronos_directional_baseline(["AAPL", "MSFT", "NVDA"], horizon=5,
-                                                         max_points=8)
+        chronos_res = await chronos_directional_baseline(
+            ["AAPL", "MSFT", "NVDA"], horizon=5, max_points=8
+        )
     except Exception as exc:
         chronos_res = {"status": "error", "err": str(exc)[:80]}
 
@@ -143,11 +156,16 @@ async def _main() -> int:
             return f"Chronos {chronos_res.get('status')} (reported, not a gate failure)"
         edge = chronos_res["edge"]
         # Chronos historically ~0.47 here → negative edge-over-drift, well below FLUX-X.
-        note = "FLUX-X primary edge ≥ Chronos" if model_edge_drift >= edge else \
-               "Chronos edge higher on this small sample (investigate before shipping)"
+        note = (
+            "FLUX-X primary edge ≥ Chronos"
+            if model_edge_drift >= edge
+            else "Chronos edge higher on this small sample (investigate before shipping)"
+        )
         if model_edge_drift < edge:
-            _caveats.append(f"Chronos edge {edge:+.4f} > FLUX-X {model_edge_drift:+.4f} on n="
-                            f"{chronos_res['n']} — small sample; investigate before shipping.")
+            _caveats.append(
+                f"Chronos edge {edge:+.4f} > FLUX-X {model_edge_drift:+.4f} on n="
+                f"{chronos_res['n']} — small sample; investigate before shipping."
+            )
         return f"Chronos acc {chronos_res['accuracy']:.4f}, edge {edge:+.4f} (n={chronos_res['n']}) → {note}"
 
     # StatsForecast + TimesFM — report availability honestly.
@@ -163,13 +181,16 @@ async def _main() -> int:
             return f"StatsForecast {st} (pip install statsforecast to enable; reported, not a fail)"
         best = sf_res["best_edge"]
         if best > model_edge_drift:
-            _caveats.append(f"StatsForecast {sf_res['best_model']} edge {best:+.4f} ≥ FLUX-X "
-                            f"{model_edge_drift:+.4f} on raw sign — §6 ceiling caveat.")
+            _caveats.append(
+                f"StatsForecast {sf_res['best_model']} edge {best:+.4f} ≥ FLUX-X "
+                f"{model_edge_drift:+.4f} on raw sign — §6 ceiling caveat."
+            )
         return f"best {sf_res['best_model']} edge {best:+.4f} (n={sf_res['n']})"
 
     def b_timesfm():
         try:
             import timesfm  # noqa: F401
+
             return "TimesFM installed (optional baseline available)"
         except Exception:
             return "TimesFM unavailable (optional; reported, not a gate failure)"
@@ -184,6 +205,7 @@ async def _main() -> int:
     stack_auc = None
     try:
         from backend.prediction.ensemble import RegimeStacker
+
         sp = ROOT / "backend/prediction/models/regime_stack.pkl"
         if sp.exists():
             rep = RegimeStacker.load(sp).report or {}
@@ -213,12 +235,25 @@ async def _main() -> int:
     from backend.prediction.flux_x import construct_book
 
     def _pred(sym, prob_up, mp=0.6):
-        return {"symbol": sym, "prob_up": prob_up, "meta_prob": mp, "regime": "trend",
-                "act": mp >= 0.6, "direction": "UP" if prob_up >= 0.5 else "DOWN"}
+        return {
+            "symbol": sym,
+            "prob_up": prob_up,
+            "meta_prob": mp,
+            "regime": "trend",
+            "act": mp >= 0.6,
+            "direction": "UP" if prob_up >= 0.5 else "DOWN",
+        }
 
     book = await construct_book(
-        [_pred("A", 0.62, 0.80), _pred("B", 0.58, 0.70), _pred("C", 0.55, 0.65),
-         _pred("D", 0.47, 0.40)], frac=0.5, vol_target=None)
+        [
+            _pred("A", 0.62, 0.80),
+            _pred("B", 0.58, 0.70),
+            _pred("C", 0.55, 0.65),
+            _pred("D", 0.47, 0.40),
+        ],
+        frac=0.5,
+        vol_target=None,
+    )
 
     def d_book_machinery():
         # FLUX-X turns calibrated per-symbol ranking into a sized, ranked, long-only book — the thing
@@ -227,8 +262,10 @@ async def _main() -> int:
         assert book["k"] >= 1, "FLUX-X failed to construct a book"
         assert syms[0] == "A", "book not ranked by edge (highest-edge name should lead)"
         assert "D" not in syms, "long-only book longed a bearish name"
-        return (f"construct_book ranks {len(syms)} names ({'>'.join(syms)}) — sign-baselines "
-                f"produce no rankable cross-section")
+        return (
+            f"construct_book ranks {len(syms)} names ({'>'.join(syms)}) — sign-baselines "
+            f"produce no rankable cross-section"
+        )
 
     def d_gate7_reference():
         # The deployable Sharpe lives in portfolio.py (GATE-7 PASS). Cross-reference it: the metric
@@ -236,10 +273,16 @@ async def _main() -> int:
         src = (ROOT / "backend/prediction/portfolio.py").read_text(encoding="utf-8")
         assert "GATE-7 RESULT — PASS" in src or "GATE-7 PASS" in src, "GATE-7 pass not documented"
         assert "0.84" in src, "deployable Sharpe 0.84 not present in portfolio.py"
-        return "GATE-7 cross-sectional Sharpe 0.84 (net-of-cost) — baselines cannot produce a Sharpe"
+        return (
+            "GATE-7 cross-sectional Sharpe 0.84 (net-of-cost) — baselines cannot produce a Sharpe"
+        )
 
-    _check("D1 FLUX-X builds a ranked, sized cross-sectional book (baselines can't)", d_book_machinery)
-    _check("D2 deployable GATE-7 Sharpe 0.84 is the closing outperformance proof", d_gate7_reference)
+    _check(
+        "D1 FLUX-X builds a ranked, sized cross-sectional book (baselines can't)", d_book_machinery
+    )
+    _check(
+        "D2 deployable GATE-7 Sharpe 0.84 is the closing outperformance proof", d_gate7_reference
+    )
 
     # ── Verdict ──
     npass = sum(ok for _, ok, _ in _results)
@@ -248,8 +291,12 @@ async def _main() -> int:
     if nfail == 0:
         print(f"  PHASE-9 AUDIT (GATE-9): ALL {npass} CHECKS PASS")
         print("  FLUX-X beats persistence outright; has genuine OOF ranking skill (AUC 0.5158,")
-        print("  deployable stack 0.5391) that NO sign/foundation baseline possesses; and is the only")
-        print("  model that produces a ranked, sized cross-sectional book → GATE-7 net Sharpe 0.84.")
+        print(
+            "  deployable stack 0.5391) that NO sign/foundation baseline possesses; and is the only"
+        )
+        print(
+            "  model that produces a ranked, sized cross-sectional book → GATE-7 net Sharpe 0.84."
+        )
     else:
         print(f"  PHASE-9 AUDIT (GATE-9): {nfail} FAILED / {npass} passed")
         for name, ok, detail in _results:

@@ -36,25 +36,39 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from .auth import require_user
-
 from . import mysql_db as M
+from .auth import require_user
 
 db_router = APIRouter(prefix="/db", tags=["mysql"])
 
 
 # ── meta ──────────────────────────────────────────────────────────────────────
 
+
 @db_router.get("/health")
 def db_health() -> dict:
     if not M.ping():
         return {"ok": False, "error": "MySQL unreachable"}
     tables = [
-        "users", "accounts", "transactions", "portfolio_holdings", "recurring_payments",
-        "contacts", "rewards",
-        "devices", "security_events", "faqs", "job_openings", "team_members",
-        "asset_catalog", "price_snapshots", "ohlcv_daily", "ohlcv_history",
-        "ai_insights", "news_cache", "predictions",
+        "users",
+        "accounts",
+        "transactions",
+        "portfolio_holdings",
+        "recurring_payments",
+        "contacts",
+        "rewards",
+        "devices",
+        "security_events",
+        "faqs",
+        "job_openings",
+        "team_members",
+        "asset_catalog",
+        "price_snapshots",
+        "ohlcv_daily",
+        "ohlcv_history",
+        "ai_insights",
+        "news_cache",
+        "predictions",
     ]
     counts = {}
     for t in tables:
@@ -67,6 +81,7 @@ def db_health() -> dict:
 
 # ── personal finance ────────────────────────────────────────────────────────
 
+
 @db_router.get("/user")
 def get_user(user_id: int = Depends(require_user)) -> dict:
     row = M.query_one("SELECT * FROM users WHERE id=%s", (user_id,))
@@ -76,8 +91,7 @@ def get_user(user_id: int = Depends(require_user)) -> dict:
 @db_router.get("/accounts")
 def get_accounts(user_id: int = Depends(require_user)) -> dict:
     # Never ship unmasked card numbers / expiry dates to the client.
-    # credit_limit is added at startup (ensure_payments_schema); COALESCE keeps
-    # this query working even if that migration hasn't run yet.
+    # credit_limit comes from migrations/005_accounts_credit_limit.py.
     rows = M.query(
         "SELECT id, user_id, name, acct_type, balance, "
         "COALESCE(credit_limit, 0) AS credit_limit, active, card_masked, "
@@ -133,17 +147,13 @@ def get_trades(
 @db_router.get("/portfolio")
 def get_portfolio(user_id: int = Depends(require_user)) -> dict:
     alloc = M.query_one("SELECT * FROM portfolio WHERE user_id=%s", (user_id,))
-    holdings = M.query(
-        "SELECT * FROM portfolio_holdings WHERE user_id=%s", (user_id,)
-    )
+    holdings = M.query("SELECT * FROM portfolio_holdings WHERE user_id=%s", (user_id,))
     return {"allocation": alloc, "holdings": holdings}
 
 
 @db_router.get("/recurring")
 def get_recurring(user_id: int = Depends(require_user)) -> dict:
-    rows = M.query(
-        "SELECT * FROM recurring_payments WHERE user_id=%s ORDER BY due_day", (user_id,)
-    )
+    rows = M.query("SELECT * FROM recurring_payments WHERE user_id=%s ORDER BY due_day", (user_id,))
     return {"recurring": rows}
 
 
@@ -177,12 +187,11 @@ def get_security(user_id: int = Depends(require_user)) -> dict:
 
 # ── site content ──────────────────────────────────────────────────────────────
 
+
 @db_router.get("/faqs")
 def get_faqs(category: str | None = None) -> dict:
     if category:
-        rows = M.query(
-            "SELECT * FROM faqs WHERE category=%s ORDER BY sort_order", (category,)
-        )
+        rows = M.query("SELECT * FROM faqs WHERE category=%s ORDER BY sort_order", (category,))
     else:
         rows = M.query("SELECT * FROM faqs ORDER BY category, sort_order")
     return {"faqs": rows}
@@ -202,12 +211,11 @@ def get_team() -> dict:
 
 # ── market (from MySQL) ─────────────────────────────────────────────────────
 
+
 @db_router.get("/market/catalog")
 def market_catalog(category: str | None = None) -> dict:
     if category:
-        rows = M.query(
-            "SELECT * FROM asset_catalog WHERE category=%s ORDER BY symbol", (category,)
-        )
+        rows = M.query("SELECT * FROM asset_catalog WHERE category=%s ORDER BY symbol", (category,))
     else:
         rows = M.query("SELECT * FROM asset_catalog ORDER BY category, symbol")
     return {"assets": rows}
@@ -227,9 +235,7 @@ def market_insights(symbol: str | None = None, limit: int = Query(20, le=200)) -
             (symbol.upper(), limit),
         )
     else:
-        rows = M.query(
-            "SELECT * FROM ai_insights ORDER BY generated_at DESC LIMIT %s", (limit,)
-        )
+        rows = M.query("SELECT * FROM ai_insights ORDER BY generated_at DESC LIMIT %s", (limit,))
     return {"insights": rows}
 
 

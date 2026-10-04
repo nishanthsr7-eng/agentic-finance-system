@@ -3,15 +3,16 @@ FLUX Backend — In-Memory TTL Cache
 Zero-dependency dict cache. Thread-safe for single-process uvicorn.
 Upgrade to Redis when horizontal scaling is needed.
 """
+
 import time
-from typing import Any, Optional
+from typing import Any
 
 
 class Cache:
     def __init__(self) -> None:
         self._store: dict[str, tuple[Any, float]] = {}
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Return cached value or None if missing / expired."""
         entry = self._store.get(key)
         if entry is None:

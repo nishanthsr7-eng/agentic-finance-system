@@ -32,6 +32,7 @@ Public API:
     compute_sentiment_features(symbol, price) -> DataFrame   # aligned to price.index, neutral-filled
     SENTIMENT_FEATURE_COLS                                   # the 5 column names
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,24 +41,24 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-from .datasources.gdelt_tone import load_gdelt_tone
 from .datasources.av_news import load_av_news
+from .datasources.gdelt_tone import load_gdelt_tone
 
 log = logging.getLogger("flux.prediction.sentiment_features")
 
 SENTIMENT_FEATURE_COLS = [
-    "news_tone",       # GDELT tone level (scaled), step/daily
-    "news_tone_z",     # causal 30d z-score of tone
-    "news_tone_mom",   # 7d-mean minus 30d-mean tone momentum
-    "news_vol_z",      # causal z-score of article volume (attention spike)
-    "news_av_sent",    # Alpha Vantage relevance-weighted ticker sentiment (equities)
+    "news_tone",  # GDELT tone level (scaled), step/daily
+    "news_tone_z",  # causal 30d z-score of tone
+    "news_tone_mom",  # 7d-mean minus 30d-mean tone momentum
+    "news_vol_z",  # causal z-score of article volume (attention spike)
+    "news_av_sent",  # Alpha Vantage relevance-weighted ticker sentiment (equities)
 ]
 
 _CLIP = 1.0
-_TONE_SCALE = 10.0     # GDELT tone is ~[-10,+10] in practice -> divide to land in ~[-1,1]
+_TONE_SCALE = 10.0  # GDELT tone is ~[-10,+10] in practice -> divide to land in ~[-1,1]
 _Z_WIN = 30
 _Z_MIN = 10
-_FFILL_LIMIT = 5       # bridge short gaps causally (row D carries the most recent print on/before D)
+_FFILL_LIMIT = 5  # bridge short gaps causally (row D carries the most recent print on/before D)
 
 
 @lru_cache(maxsize=1)
@@ -133,19 +134,24 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
-        from backend.db import init_db, get_history
+        from backend.db import get_history, init_db
         from backend.prediction.features import build_features_from_df, calibrate_fd_order
+
         await init_db()
         gd, av = _gdelt_panel(), _av_panel()
-        print(f"GDELT panel: {len(gd):,} rows / {gd.symbol.nunique() if not gd.empty else 0} symbols ; "
-              f"AV panel: {len(av):,} rows / {av.symbol.nunique() if not av.empty else 0} symbols")
+        print(
+            f"GDELT panel: {len(gd):,} rows / {gd.symbol.nunique() if not gd.empty else 0} symbols ; "
+            f"AV panel: {len(av):,} rows / {av.symbol.nunique() if not av.empty else 0} symbols"
+        )
         for sym in ("AAPL", "NVDA", "BTC", "ETH"):
             rows = await get_history(sym)
             if not rows:
-                print(f"  {sym:5} no history"); continue
+                print(f"  {sym:5} no history")
+                continue
             df = pd.DataFrame(rows)
             d = calibrate_fd_order(pd.Series(df["adj_close"].astype(float).values[: len(df) // 2]))
             feat = build_features_from_df(df, fd_order=d)

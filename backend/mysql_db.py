@@ -28,10 +28,13 @@ Schema groups
 from __future__ import annotations
 
 import logging
+import queue
+import time
 from contextlib import contextmanager
 
 import certifi
 import pymysql
+from pymysql.constants import SERVER_STATUS
 from pymysql.cursors import DictCursor
 
 from .config import settings
@@ -40,6 +43,7 @@ log = logging.getLogger("flux.mysql")
 
 
 # ── Connection ──────────────────────────────────────────────────────────────
+
 
 def _conn_kwargs(include_db: bool = True) -> dict:
     kw = dict(
@@ -66,14 +70,78 @@ def _conn_kwargs(include_db: bool = True) -> dict:
     return kw
 
 
+# Idle connections as (conn, last_used_monotonic). LIFO so the warmest one is
+# reused first and the rest age out. Thread-safe: /db routes run in the
+# threadpool and the scheduler uses executors.
+_pool: queue.LifoQueue = queue.LifoQueue()
+
+
+def _checkout():
+    while True:
+        try:
+            conn, last_used = _pool.get_nowait()
+        except queue.Empty:
+            return pymysql.connect(**_conn_kwargs(True))
+        try:
+            if time.monotonic() - last_used > settings.MYSQL_POOL_PING_AFTER_S:
+                conn.ping(reconnect=True)
+            return conn
+        except Exception:  # noqa: BLE001 — dead connection: drop it, try the next
+            _close_quietly(conn)
+
+
+def _checkin(conn) -> None:
+    # Never pool a connection left mid-transaction (a caller that began and
+    # neither committed nor rolled back) or beyond the size cap.
+    in_txn = conn.server_status & SERVER_STATUS.SERVER_STATUS_IN_TRANS
+    if in_txn or not conn.open or _pool.qsize() >= settings.MYSQL_POOL_SIZE:
+        _close_quietly(conn)
+        return
+    _pool.put((conn, time.monotonic()))
+
+
+def _close_quietly(conn) -> None:
+    try:
+        conn.close()
+    except Exception:  # noqa: BLE001 — already closed / broken
+        pass
+
+
+def close_pool() -> None:
+    """Close every idle pooled connection (shutdown, tests)."""
+    while True:
+        try:
+            conn, _ = _pool.get_nowait()
+        except queue.Empty:
+            return
+        _close_quietly(conn)
+
+
 @contextmanager
 def get_conn(include_db: bool = True):
-    """Yield a PyMySQL connection, always closed on exit."""
-    conn = pymysql.connect(**_conn_kwargs(include_db))
+    """Yield a PyMySQL connection.
+
+    With MYSQL_POOL_SIZE > 0 it is borrowed from a small pool and returned on
+    a clean exit; on an exception it is closed instead, so a half-used
+    connection is never handed to the next caller. Without a pool (the
+    default) or for the database-less admin connection, it is opened and
+    closed per call as before.
+    """
+    if settings.MYSQL_POOL_SIZE <= 0 or not include_db:
+        conn = pymysql.connect(**_conn_kwargs(include_db))
+        try:
+            yield conn
+        finally:
+            conn.close()
+        return
+
+    conn = _checkout()
     try:
         yield conn
-    finally:
-        conn.close()
+    except BaseException:
+        _close_quietly(conn)
+        raise
+    _checkin(conn)
 
 
 def query(sql: str, params: tuple | None = None) -> list[dict]:
@@ -101,6 +169,8 @@ def ping() -> bool:
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────
+# Baseline only (applied by migrations/001_baseline.py). Don't edit tables
+# here any more: add a new file to backend/migrations/ instead.
 # One CREATE TABLE per entry; executed in order so foreign keys resolve.
 
 DDL: list[str] = [
@@ -307,7 +377,6 @@ DDL: list[str] = [
         INDEX idx_se_user (user_id, event_at DESC)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
-
     """
     CREATE TABLE IF NOT EXISTS trades (
         id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -325,7 +394,6 @@ DDL: list[str] = [
         INDEX idx_trade_symbol (symbol)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
-
     # ---- 2. Market data -------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS asset_catalog (
@@ -471,7 +539,6 @@ DDL: list[str] = [
         ts      BIGINT NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
-
     # ---- 3. Site content ------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS faqs (
@@ -523,3 +590,6 @@ def init_schema() -> None:
         for stmt in DDL:
             cur.execute(stmt)
     log.info("MySQL schema initialised (%d tables)", len(DDL))
+    from .migrate import run_migrations
+
+    run_migrations()

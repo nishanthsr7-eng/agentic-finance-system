@@ -15,6 +15,7 @@ Design choices for safety:
     python scripts/dl_binance_oi_parallel.py --symbols BNB SOL     # subset
     python scripts/dl_binance_oi_parallel.py --workers 32 --force  # faster / redo everything
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,13 +32,20 @@ import pandas as pd
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dl_binance import PAIRS, OUT  # noqa: E402  (reuse universe + output dir)
+from dl_binance import OUT, PAIRS  # noqa: E402  (reuse universe + output dir)
 
 OI_DIR = OUT / "open_interest"
 BASE = "https://data.binance.vision/data/futures/um/daily/metrics"
-OI_COLS = ["create_time", "symbol", "sum_open_interest", "sum_open_interest_value",
-           "count_toptrader_long_short_ratio", "sum_toptrader_long_short_ratio",
-           "count_long_short_ratio", "sum_taker_long_short_vol_ratio"]
+OI_COLS = [
+    "create_time",
+    "symbol",
+    "sum_open_interest",
+    "sum_open_interest_value",
+    "count_toptrader_long_short_ratio",
+    "sum_toptrader_long_short_ratio",
+    "count_long_short_ratio",
+    "sum_taker_long_short_vol_ratio",
+]
 
 _local = threading.local()
 
@@ -68,7 +76,7 @@ def _grab(pair: str, day: str) -> pd.DataFrame | None:
             return None
         df = pd.read_csv(io.BytesIO(inner), header=None)
         try:
-            float(str(df.iloc[0, 0]))                 # numeric first cell → no header row
+            float(str(df.iloc[0, 0]))  # numeric first cell → no header row
         except ValueError:
             df = df.iloc[1:].reset_index(drop=True)
         if df.shape[1] == len(OI_COLS):
@@ -89,13 +97,16 @@ def pull_symbol(sym: str, pair: str, start_year: int, workers: int) -> int:
             if df is not None:
                 frames.append(df)
     if not frames:
-        print(f"  {sym:5} oi: no data ({time.time()-t0:.0f}s)", flush=True)
+        print(f"  {sym:5} oi: no data ({time.time() - t0:.0f}s)", flush=True)
         return 0
     out = pd.concat(frames, ignore_index=True).drop_duplicates()
     OI_DIR.mkdir(parents=True, exist_ok=True)
     out.to_csv(OI_DIR / f"oi_{sym}.csv", index=False)
-    print(f"  {sym:5} oi: {len(out):>7} rows in {time.time()-t0:.0f}s "
-          f"({sum(1 for x in frames)} days)", flush=True)
+    print(
+        f"  {sym:5} oi: {len(out):>7} rows in {time.time() - t0:.0f}s "
+        f"({sum(1 for x in frames)} days)",
+        flush=True,
+    )
     return len(out)
 
 
@@ -117,7 +128,7 @@ def main(argv: list[str]) -> int:
     t0, total = time.time(), 0
     for sym in todo:
         total += pull_symbol(sym, PAIRS[sym], a.start, a.workers)
-    print(f"DONE — {total} OI rows for {len(todo)} symbols in {time.time()-t0:.0f}s", flush=True)
+    print(f"DONE — {total} OI rows for {len(todo)} symbols in {time.time() - t0:.0f}s", flush=True)
     return 0
 
 

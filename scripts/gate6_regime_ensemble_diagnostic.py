@@ -14,6 +14,7 @@ Also reports corr(primary, p2) — if ~1 there is no diversity for stacking to e
 
     python scripts/gate6_regime_ensemble_diagnostic.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,6 +36,7 @@ async def _get_feats():
             d = pickle.load(f)
         return d["feats"], d["y"]
     from backend.prediction.ensemble import _assemble_oof
+
     feats, y, _ctx = await _assemble_oof()
     with open(CACHE, "wb") as f:
         pickle.dump({"feats": feats, "y": y}, f)
@@ -44,12 +46,14 @@ async def _get_feats():
 
 def _auc(y, p):
     from sklearn.metrics import roc_auc_score
+
     return float(roc_auc_score(y, p)) if len(np.unique(y)) > 1 else float("nan")
 
 
 def _fit_logit(Xtr, ytr, C=1.0):
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
+
     sc = StandardScaler().fit(Xtr)
     clf = LogisticRegression(C=C, max_iter=2000).fit(sc.transform(Xtr), ytr)
     return sc, clf
@@ -57,35 +61,44 @@ def _fit_logit(Xtr, ytr, C=1.0):
 
 def _moe(feats, y, cols, gate=True, C=1.0):
     """Fit per-regime (or single) logistic on early 70%, score late 30% softly gated by posterior."""
-    from backend.prediction.ensemble import REGIMES, REGIME_PROBS
+    from backend.prediction.ensemble import REGIME_PROBS, REGIMES
+
     X = feats[cols].values.astype(float)
     rp = feats[REGIME_PROBS].values.astype(float)
     rl = feats["regime"].astype(str).values
-    n = len(X); cut = int(n * 0.7)
+    n = len(X)
+    cut = int(n * 0.7)
     sc, glob = _fit_logit(X[:cut], y[:cut], C)
     Xs = sc.transform(X)
     if not gate:
         return glob.predict_proba(Xs[cut:])[:, 1]
     experts = {}
     for r in REGIMES:
-        m = (rl[:cut] == r)
+        m = rl[:cut] == r
         if m.sum() >= 500 and len(np.unique(y[:cut][m])) > 1:
             from sklearn.linear_model import LogisticRegression
+
             experts[r] = LogisticRegression(C=C, max_iter=2000).fit(Xs[:cut][m], y[:cut][m])
         else:
             experts[r] = glob
-    pred = np.zeros(n - cut); wsum = np.zeros(n - cut)
+    pred = np.zeros(n - cut)
+    wsum = np.zeros(n - cut)
     for j, r in enumerate(REGIMES):
         pr = experts[r].predict_proba(Xs[cut:])[:, 1]
         wj = np.clip(rp[cut:, j], 0, None)
-        pred += wj * pr; wsum += wj
-    return np.where(wsum > 1e-9, pred / np.where(wsum > 1e-9, wsum, 1), glob.predict_proba(Xs[cut:])[:, 1])
+        pred += wj * pr
+        wsum += wj
+    return np.where(
+        wsum > 1e-9, pred / np.where(wsum > 1e-9, wsum, 1), glob.predict_proba(Xs[cut:])[:, 1]
+    )
 
 
 async def _main():
     from backend.prediction.ensemble import BASE_SIGNALS, STACK_COLS
+
     feats, y = await _get_feats()
-    n = len(feats); cut = int(n * 0.7)
+    n = len(feats)
+    cut = int(n * 0.7)
     yte = y[cut:]
     prim = feats["primary_cal"].values
     p2 = feats["p2_base"].values
@@ -97,10 +110,10 @@ async def _main():
     print(f"{'best base':14}{best_base:>12.4f}{0.0:>+14.4f}")
 
     variants = {
-        "V1 global":   _moe(feats, y, BASE_SIGNALS, gate=False),
+        "V1 global": _moe(feats, y, BASE_SIGNALS, gate=False),
         "V2 global+r": _moe(feats, y, STACK_COLS, gate=False),
         "V3 MoE base": _moe(feats, y, BASE_SIGNALS, gate=True),
-        "V4 MoE+r":    _moe(feats, y, STACK_COLS, gate=True),
+        "V4 MoE+r": _moe(feats, y, STACK_COLS, gate=True),
     }
     # V5: shrink V1 toward calibrated primary (robust to non-stationary stack drift)
     variants["V5 shrink"] = 0.5 * variants["V1 global"] + 0.5 * prim[cut:]

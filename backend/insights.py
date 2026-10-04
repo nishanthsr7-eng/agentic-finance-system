@@ -18,17 +18,16 @@ Insight JSON schema (from Ollama):
 import json
 import logging
 import time
-from typing import Any
 
 import httpx
 
-from .config import settings
-from .db import insert_insight
 from . import llm
+from .db import insert_insight
 
 log = logging.getLogger("flux.insights")
 
 _http: httpx.AsyncClient | None = None
+
 
 def _client() -> httpx.AsyncClient:
     global _http
@@ -97,7 +96,7 @@ async def generate_asset_insight(asset: dict) -> dict | None:
         asset_type=asset.get("asset_type", "unknown"),
     )
     try:
-        raw  = await _ollama_call(prompt)
+        raw = await _ollama_call(prompt)
         data = json.loads(_strip_fences(raw))
     except RuntimeError as exc:
         log.warning("Ollama unavailable for %s: %s", asset["symbol"], exc)
@@ -107,31 +106,32 @@ async def generate_asset_insight(asset: dict) -> dict | None:
         return None
 
     ts = int(time.time() * 1000)
-    sentiment  = str(data.get("sentiment", "neutral")).lower()
+    sentiment = str(data.get("sentiment", "neutral")).lower()
     confidence = int(data.get("confidence", 0))
-    signal     = str(data.get("signal", "HOLD")).upper()
-    summary    = str(data.get("summary", ""))
-    key_level  = str(data.get("key_level", ""))
-    catalyst   = str(data.get("catalyst", ""))
+    signal = str(data.get("signal", "HOLD")).upper()
+    summary = str(data.get("summary", ""))
+    key_level = str(data.get("key_level", ""))
+    catalyst = str(data.get("catalyst", ""))
 
     content = (
         f"{asset.get('name', asset['symbol'])} ({asset['symbol']}) — "
-        f"Signal: {signal} | {sentiment.capitalize()} ({confidence}% confidence). "
+        f"LLM commentary (not a model signal): {signal} | {sentiment.capitalize()}, "
+        f"LLM conviction {confidence}/100. "
         f"{summary} Key level: {key_level}. Catalyst: {catalyst}."
     )
 
     return {
-        "symbol":       asset["symbol"],
+        "symbol": asset["symbol"],
         "insight_type": "price_analysis",
-        "content":      content,
-        "sentiment":    sentiment,
-        "confidence":   confidence,
+        "content": content,
+        "sentiment": sentiment,
+        "confidence": confidence,
         "generated_at": ts,
         # extra fields for callers (not stored in base DB row)
-        "_signal":    signal,
+        "_signal": signal,
         "_key_level": key_level,
-        "_catalyst":  catalyst,
-        "_summary":   summary,
+        "_catalyst": catalyst,
+        "_summary": summary,
     }
 
 
@@ -139,8 +139,7 @@ async def generate_market_summary(assets: list[dict]) -> str | None:
     """Generate a short natural-language market summary from top movers."""
     top = sorted(assets, key=lambda a: abs(a.get("change_pct", 0)), reverse=True)[:5]
     movers_str = ", ".join(
-        f"{a.get('name', a['symbol'])} {a.get('change_pct', 0):+.2f}%"
-        for a in top
+        f"{a.get('name', a['symbol'])} {a.get('change_pct', 0):+.2f}%" for a in top
     )
     try:
         return await _ollama_call(_MARKET_SUMMARY_TMPL.format(movers_str=movers_str))
@@ -170,11 +169,11 @@ async def run_insight_cycle(
         if insight is None:
             continue
         db_row = {
-            "symbol":       insight["symbol"],
+            "symbol": insight["symbol"],
             "insight_type": insight["insight_type"],
-            "content":      insight["content"],
-            "sentiment":    insight["sentiment"],
-            "confidence":   insight["confidence"],
+            "content": insight["content"],
+            "sentiment": insight["sentiment"],
+            "confidence": insight["confidence"],
             "generated_at": insight["generated_at"],
         }
         await insert_insight(db_row)

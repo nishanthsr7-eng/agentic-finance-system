@@ -34,8 +34,11 @@ def load_fng() -> pd.DataFrame:
     if not data:
         return pd.DataFrame(columns=cols)
     df = pd.DataFrame(data)
-    df["date"] = pd.to_datetime(pd.to_numeric(df["timestamp"], errors="coerce"),
-                                unit="s", utc=True).dt.tz_localize(None).dt.normalize()
+    df["date"] = (
+        pd.to_datetime(pd.to_numeric(df["timestamp"], errors="coerce"), unit="s", utc=True)
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
     df["fng"] = pd.to_numeric(df["value"], errors="coerce")
     df["fng_class"] = df.get("value_classification")
     return tidy(df[cols], has_symbol=False)

@@ -16,12 +16,13 @@ name: Keep the API warm
 # FLUX_API_URL, e.g. https://flux-api.onrender.com
 #   Settings -> Secrets and variables -> Actions -> Variables -> New variable
 
+# The schedule is off: the Cloudflare Worker in keep-warm-worker/ now pings
+# /health on its own cron, so this workflow only doubled the pings (~4,300
+# Actions runs a month). It stays as a manual fallback: Actions -> "Keep the API
+# warm" -> Run workflow. To bring the schedule back, re-add under `on:`
+#   schedule:
+#     - cron: "*/10 * * * *"
 on:
-  schedule:
-    # Every 10 minutes. GitHub's scheduler is best-effort and can run several
-    # minutes late under load, so 10 leaves margin against the 15-minute idle
-    # timeout; a 14-minute interval would drift into spin-downs.
-    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 permissions:

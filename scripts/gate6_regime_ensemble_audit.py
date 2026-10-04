@@ -32,6 +32,7 @@ Four sections, each a hard pass/fail:
 Run:  python scripts/gate6_regime_ensemble_audit.py        (exit 0 = all pass, 1 = any failure)
 Heavy: builds the ~138k-event panel + trains several purged-OOF models (a few minutes).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -61,8 +62,14 @@ def _check(name: str, fn) -> None:
 async def _main() -> int:
     from backend.prediction import test_ensemble as t6
     from backend.prediction.ensemble import (
-        train_regime_stack, RegimeStacker, REGIMES, BASE_SIGNALS, REGIME_PROBS, OOF_COLS,
-        GATE_MARGIN)
+        BASE_SIGNALS,
+        GATE_MARGIN,
+        OOF_COLS,
+        REGIME_PROBS,
+        REGIMES,
+        RegimeStacker,
+        train_regime_stack,
+    )
 
     print("=" * 80)
     print("  PHASE-6 AUDIT — regime-conditional mixture-of-experts: correctness + honesty")
@@ -72,23 +79,34 @@ async def _main() -> int:
     print("\n[A] UNIT CORRECTNESS  (ensemble.py synthetic checks)")
     feats_s, y_s = t6._synth_oof()
     stk_s, rep_s = train_regime_stack(feats_s, y_s)
-    _check("A1 soft-mixture math == manual weighted avg; scalar==batch",
-           lambda: t6._check_mixture_math(stk_s, feats_s))
+    _check(
+        "A1 soft-mixture math == manual weighted avg; scalar==batch",
+        lambda: t6._check_mixture_math(stk_s, feats_s),
+    )
     _check("A2 probabilities finite + bounded [0,1]", lambda: t6._check_bounds(stk_s, feats_s))
-    _check("A3 one-hot posterior routes to the matching expert",
-           lambda: t6._check_hard_routing(feats_s))
+    _check(
+        "A3 one-hot posterior routes to the matching expert",
+        lambda: t6._check_hard_routing(feats_s),
+    )
     _check("A4 low-count / zero-posterior fall back to global", t6._check_fallback)
     _check("A5 oof_base2 is purged-OOF aligned", t6._check_oof_base2_alignment)
     _check("A6 GATE-6 report internally consistent", lambda: t6._check_gate_logic(rep_s))
-    _check("A7 regime experts earn their place on regime-switch truth",
-           lambda: t6._check_moe_earns_place(rep_s))
+    _check(
+        "A7 regime experts earn their place on regime-switch truth",
+        lambda: t6._check_moe_earns_place(rep_s),
+    )
 
     # ── B + C need the real panel + OOF assembly ─────────────────────────────────
-    print("\n[B] OOF ASSEMBLY LEAK-SAFETY  (real panel — assembling base signals + regime posteriors)")
+    print(
+        "\n[B] OOF ASSEMBLY LEAK-SAFETY  (real panel — assembling base signals + regime posteriors)"
+    )
     from backend.prediction.ensemble import _assemble_oof
+
     feats, y, _ctx = await _assemble_oof()
-    print(f"  assembled {len(feats):,} OOF stack rows | "
-          f"regime mix {{ {', '.join(f'{r}:{int((feats.regime==r).sum()):,}' for r in REGIMES)} }}")
+    print(
+        f"  assembled {len(feats):,} OOF stack rows | "
+        f"regime mix {{ {', '.join(f'{r}:{int((feats.regime == r).sum()):,}' for r in REGIMES)} }}"
+    )
 
     def b_signals_sane():
         for c in ("primary_cal", "p2_base", "meta_prob"):
@@ -103,8 +121,9 @@ async def _main() -> int:
         assert np.isfinite(rp).all(), "regime posteriors non-finite"
         assert (rp >= -1e-9).all() and (rp <= 1 + 1e-9).all(), "regime posteriors outside [0,1]"
         sums = rp.sum(axis=1)
-        assert np.allclose(sums, 1.0, atol=1e-3), \
+        assert np.allclose(sums, 1.0, atol=1e-3), (
             f"regime posteriors do not sum to 1 (max dev {np.abs(sums - 1).max():.2e})"
+        )
         return f"3 regime posteriors in [0,1], rows sum to 1 (max dev {np.abs(sums - 1).max():.1e})"
 
     def b_no_nan_sorted():
@@ -120,18 +139,26 @@ async def _main() -> int:
     # ── C. GATE-6 reproduction on the real panel ─────────────────────────────────
     print("\n[C] GATE-6 REPRODUCTION  (fit MoE on early 70%, score later 30%)")
     stacker, rep = train_regime_stack(feats, y)
-    print(f"    base : primary {rep['primary_auc']:.4f} | base2(EN) {rep['p2_auc']:.4f} "
-          f"(corr {rep['p2_corr_primary']:.3f}) -> best {rep['best_base_name']} {rep['best_base_auc']:.4f}")
-    print(f"    stack: shipped {rep['stack_auc']:.4f} (unshrunk {rep['stack_unshrunk_auc']:.4f}, "
-          f"blend->primary {rep['primary_blend']:.2f}) | lift vs best base {rep['lift_vs_best_base']:+.4f}")
-    print(f"    regime ablation: global {rep['global_stack_auc']:.4f} | MoE {rep['moe_stack_auc']:.4f} "
-          f"| +regime-as-feature {rep['regime_feature_stack_auc']:.4f} -> use_experts={rep['use_experts']}")
+    print(
+        f"    base : primary {rep['primary_auc']:.4f} | base2(EN) {rep['p2_auc']:.4f} "
+        f"(corr {rep['p2_corr_primary']:.3f}) -> best {rep['best_base_name']} {rep['best_base_auc']:.4f}"
+    )
+    print(
+        f"    stack: shipped {rep['stack_auc']:.4f} (unshrunk {rep['stack_unshrunk_auc']:.4f}, "
+        f"blend->primary {rep['primary_blend']:.2f}) | lift vs best base {rep['lift_vs_best_base']:+.4f}"
+    )
+    print(
+        f"    regime ablation: global {rep['global_stack_auc']:.4f} | MoE {rep['moe_stack_auc']:.4f} "
+        f"| +regime-as-feature {rep['regime_feature_stack_auc']:.4f} -> use_experts={rep['use_experts']}"
+    )
     print(f"    {'regime':10}{'n':>8}{'stack':>10}{'primary':>10}{'delta':>10}")
     for r in REGIMES:
         pr = rep["per_regime"][r]
         if pr["stack_auc"] is not None:
-            print(f"    {r:10}{pr['n']:>8,}{pr['stack_auc']:>10.4f}{pr['primary_auc']:>10.4f}"
-                  f"{pr['stack_auc'] - pr['primary_auc']:>+10.4f}")
+            print(
+                f"    {r:10}{pr['n']:>8,}{pr['stack_auc']:>10.4f}{pr['primary_auc']:>10.4f}"
+                f"{pr['stack_auc'] - pr['primary_auc']:>+10.4f}"
+            )
         else:
             print(f"    {r:10}{pr['n']:>8,}{'(too few)':>10}")
 
@@ -155,11 +182,16 @@ async def _main() -> int:
         assert rep["use_experts"] == expect, "use_experts decision not data-driven"
         # usage (a): regime-as-feature is measured but must never be the shipped stack.
         assert "regime_feature_stack_auc" in rep, "regime-as-feature ablation not recorded"
-        note = "" if rep["regime_feature_stack_auc"] <= rep["global_stack_auc"] else \
-            " (NOTE: regime-as-feature helped on this panel — revisit usage (a))"
-        return (f"experts kept iff MoE>global (use_experts={rep['use_experts']}); "
-                f"regime-as-feature {rep['regime_feature_stack_auc']:.4f} vs global "
-                f"{rep['global_stack_auc']:.4f}, not shipped{note}")
+        note = (
+            ""
+            if rep["regime_feature_stack_auc"] <= rep["global_stack_auc"]
+            else " (NOTE: regime-as-feature helped on this panel — revisit usage (a))"
+        )
+        return (
+            f"experts kept iff MoE>global (use_experts={rep['use_experts']}); "
+            f"regime-as-feature {rep['regime_feature_stack_auc']:.4f} vs global "
+            f"{rep['global_stack_auc']:.4f}, not shipped{note}"
+        )
 
     _check("C1 GATE-6 report internally consistent (real panel)", c_report_consistent)
     _check("C2 GATE-6 verdict recorded", c_verdict)
@@ -170,8 +202,10 @@ async def _main() -> int:
 
     def _gate_decision(report: dict) -> bool:
         """Mirror of the exact condition in predict.py _load()."""
-        return bool(report.get("gate6_pass") or
-                    report.get("stack_auc", 0.0) > report.get("best_base_auc", 1.0) + GATE_MARGIN)
+        return bool(
+            report.get("gate6_pass")
+            or report.get("stack_auc", 0.0) > report.get("best_base_auc", 1.0) + GATE_MARGIN
+        )
 
     def d_gate_enables_only_on_lift():
         passing = {"gate6_pass": True, "stack_auc": 0.55, "best_base_auc": 0.52}
@@ -188,12 +222,16 @@ async def _main() -> int:
         # actually requires both so a stack without its base-2 learner can never be activated.
         src = (Path(__file__).resolve().parents[1] / "backend/prediction/predict.py").read_text()
         assert "regime_stack.pkl" in src and "base2.pkl" in src, "predict.py missing artifact refs"
-        assert "stack_path.exists() and base2_path.exists()" in src, \
+        assert "stack_path.exists() and base2_path.exists()" in src, (
             "predict.py does not require BOTH stack + base2 artifacts"
+        )
         return "serving requires regime_stack.pkl AND base2.pkl"
 
-    def d_save_load_roundtrip(tmp=Path(__file__).resolve().parents[1] / "backend/prediction/models"):
+    def d_save_load_roundtrip(
+        tmp=Path(__file__).resolve().parents[1] / "backend/prediction/models",
+    ):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "regime_stack.pkl"
             stacker.save(p)

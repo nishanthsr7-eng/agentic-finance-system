@@ -35,12 +35,13 @@ _CHROMA_DIR = _resolve_chroma_dir()
 
 # Suppress noisy ONNX TensorRT/CUDA probe warnings — falls back to CPU cleanly
 import os as _os
+
 _os.environ.setdefault("ORT_LOGGING_LEVEL", "3")  # ERROR only
 
 # ── Module-level lazy singletons ──────────────────────────────────────────────
 _chroma_client: Any = None
-_collections:   dict = {}
-_embedding_fn:  Any = None
+_collections: dict = {}
+_embedding_fn: Any = None
 _rag_available: bool = False
 
 
@@ -55,6 +56,7 @@ def _init_embedding_fn() -> Any:
         return _embedding_fn
     try:
         from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
         _embedding_fn = DefaultEmbeddingFunction()
         log.info("ChromaDB: using DefaultEmbeddingFunction (all-MiniLM-L6-v2 ONNX)")
     except Exception as exc:
@@ -78,6 +80,7 @@ def init_chroma() -> bool:
         return False
     try:
         import chromadb
+
         _CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         _chroma_client = chromadb.PersistentClient(path=str(_CHROMA_DIR))
         ef = _init_embedding_fn()
@@ -91,8 +94,7 @@ def init_chroma() -> bool:
         log.info("ChromaDB initialised at %s (3 collections)", _CHROMA_DIR)
         return True
     except ImportError:
-        log.warning("chromadb not installed — RAG pipeline disabled. "
-                    "Run: pip install chromadb")
+        log.warning("chromadb not installed — RAG pipeline disabled. Run: pip install chromadb")
         _rag_available = False
         return False
     except Exception as exc:
@@ -111,11 +113,12 @@ def _col(name: str):
 
 # ── Embedding helpers ─────────────────────────────────────────────────────────
 
+
 def _price_narrative(snap: dict) -> str:
     """Convert a snapshot dict to an embeddable text sentence."""
     direction = "up" if (snap.get("change_pct") or 0) >= 0 else "down"
     mcap = snap.get("market_cap", 0) or 0
-    cap_str = f" Market cap: ${mcap/1e9:.1f}B." if mcap > 0 else ""
+    cap_str = f" Market cap: ${mcap / 1e9:.1f}B." if mcap > 0 else ""
     return (
         f"{snap.get('name', snap['symbol'])} ({snap['symbol']}) "
         f"is trading at {snap['price']:.4f}, "
@@ -132,7 +135,7 @@ def embed_market_snapshots(snapshots: list[dict]) -> None:
         col = _col("market_snapshots")
         if col is None:
             return
-        ts  = int(time.time())
+        ts = int(time.time())
         docs, ids, metas = [], [], []
         for s in snapshots:
             sym = s.get("symbol", "")
@@ -141,12 +144,14 @@ def embed_market_snapshots(snapshots: list[dict]) -> None:
             doc_id = f"{sym}_{ts}"
             docs.append(_price_narrative(s))
             ids.append(doc_id)
-            metas.append({
-                "symbol":     sym,
-                "price":      float(s.get("price", 0)),
-                "change_pct": float(s.get("change_pct", 0)),
-                "ts":         ts,
-            })
+            metas.append(
+                {
+                    "symbol": sym,
+                    "price": float(s.get("price", 0)),
+                    "change_pct": float(s.get("change_pct", 0)),
+                    "ts": ts,
+                }
+            )
         col.upsert(documents=docs, ids=ids, metadatas=metas)
         log.debug("Embedded %d market snapshots in ChromaDB", len(docs))
     except Exception as exc:
@@ -171,11 +176,13 @@ def embed_news(articles: list[dict]) -> None:
                 continue
             docs.append(text)
             ids.append(url)
-            metas.append({
-                "source":       a.get("source", ""),
-                "published_at": a.get("published_at", ""),
-                "url":          url,
-            })
+            metas.append(
+                {
+                    "source": a.get("source", ""),
+                    "published_at": a.get("published_at", ""),
+                    "url": url,
+                }
+            )
         if docs:
             col.upsert(documents=docs, ids=ids, metadatas=metas)
             log.debug("Embedded %d news articles in ChromaDB", len(docs))
@@ -195,18 +202,21 @@ def embed_insight(insight: dict) -> None:
         col.upsert(
             documents=[insight["content"]],
             ids=[doc_id],
-            metadatas=[{
-                "symbol":       insight["symbol"],
-                "sentiment":    insight.get("sentiment", ""),
-                "insight_type": insight.get("insight_type", ""),
-                "generated_at": int(insight.get("generated_at", 0)),
-            }],
+            metadatas=[
+                {
+                    "symbol": insight["symbol"],
+                    "sentiment": insight.get("sentiment", ""),
+                    "insight_type": insight.get("insight_type", ""),
+                    "generated_at": int(insight.get("generated_at", 0)),
+                }
+            ],
         )
     except Exception as exc:
         log.warning("embed_insight failed: %s", exc)
 
 
 # ── Query ─────────────────────────────────────────────────────────────────────
+
 
 def rag_query(query: str, n_results: int = 6) -> tuple[str, int]:
     """
@@ -233,10 +243,7 @@ def rag_query(query: str, n_results: int = 6) -> tuple[str, int]:
     if not contexts:
         return "", 0
 
-    merged = "\n\n".join(
-        f"[Context {i+1}] {doc}"
-        for i, doc in enumerate(contexts[:n_results])
-    )
+    merged = "\n\n".join(f"[Context {i + 1}] {doc}" for i, doc in enumerate(contexts[:n_results]))
     return merged, len(contexts[:n_results])
 
 

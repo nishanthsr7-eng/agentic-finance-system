@@ -82,7 +82,7 @@
     let allCandles = [];
     let chartW = 900, chartH = 260;
     let currentTimeframe = '1D';
-    let currentAsset = 'nifty';
+    let currentAsset = 'btc';
 
     const mainSVG   = document.getElementById('main-svg');
     const candleGrp = document.getElementById('candle-group');
@@ -92,7 +92,6 @@
     const liveChgEl   = document.getElementById('live-chg');
 
     const ASSETS = {
-      nifty: { name: 'NIFTY50 / INR', icon: '₹', desc: 'Portfolio — Growth ETF',    fmtPrefix: '₹',  fmtLocale: 'en-IN' },
       btc:   { name: 'BTC / CRYPTO',  icon: '₿', desc: 'Sovereign Digital Asset',   fmtPrefix: '$',  fmtLocale: 'en-US' },
       eth:   { name: 'ETH / CRYPTO',  icon: 'Ξ', desc: 'Smart Contract Utility',    fmtPrefix: '$',  fmtLocale: 'en-US' },
     };
@@ -650,15 +649,15 @@
         markUnavailable('alloc-chg-btc', 'alloc-chg-eth');
       }
 
-      // NIFTY from candles endpoint (compare first open to last close of 1D)
+      // SPY from candles endpoint (compare first open to last close of 1D)
       try {
-        const res = await fetch(`${API}/market/candles/nifty?tf=1D`);
+        const res = await fetch(`${API}/market/candles/spy?tf=1D`);
         if (!res.ok) throw new Error(res.status);
         const data = await res.json();
         const c = data.candles || [];
         if (c.length > 1) {
           const pct = ((c[c.length - 1].c - c[0].o) / c[0].o * 100);
-          const el  = document.getElementById('alloc-chg-nifty');
+          const el  = document.getElementById('alloc-chg-spy');
           if (el) {
             const valSpan = el.querySelector('span:last-child') || el;
             valSpan.textContent = (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct).toFixed(2) + '%';
@@ -666,9 +665,9 @@
           }
         }
       } catch (e) {
-        console.warn('updateAssetAllocation nifty failed:', e);
+        console.warn('updateAssetAllocation spy failed:', e);
       } finally {
-        markUnavailable('alloc-chg-nifty');
+        markUnavailable('alloc-chg-spy');
       }
     }
 
@@ -869,7 +868,7 @@
       const b1 = document.getElementById('alloc-bar-1');
       const b2 = document.getElementById('alloc-bar-2');
       const b3 = document.getElementById('alloc-bar-3');
-      const p1 = document.getElementById('alloc-pct-nifty');
+      const p1 = document.getElementById('alloc-pct-spy');
       const p2 = document.getElementById('alloc-pct-btc');
       const p3 = document.getElementById('alloc-pct-eth');
 
@@ -929,9 +928,9 @@
       const label  = divIdx >= 75 ? 'Optimal' : divIdx >= 50 ? 'Moderate' : 'Concentrated';
       if (divEl) divEl.textContent = `${divIdx}/100 — ${label}`;
 
-      // Featured cards: NIFTY50 ETF, Bitcoin, Ethereum — weight = value / total portfolio
+      // Featured cards: S&P 500 ETF, Bitcoin, Ethereum — weight = value / total portfolio
       const find = sym => valued.find(h => h.symbol === sym);
-      const w1 = (find('NIFTYBEES')?.value || 0) / total;
+      const w1 = (find('SPY')?.value || 0) / total;
       const w2 = (find('BTC')?.value || 0) / total;
       const w3 = (find('ETH')?.value || 0) / total;
 
@@ -1169,7 +1168,11 @@
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || res.status);
+          // FastAPI validation errors (422) carry detail as a list of {loc, msg}.
+          const detail = Array.isArray(err.detail)
+            ? err.detail.map(d => `${(d.loc || []).slice(-1)[0] || 'input'}: ${d.msg}`).join('; ')
+            : err.detail;
+          throw new Error(detail || res.status);
         }
         const data = await res.json();
 
@@ -1264,17 +1267,9 @@
       const btStartInput = document.getElementById('bt-start');
       if (btStartInput) btStartInput.max = today;
       document.getElementById('bt-run-btn')?.addEventListener('click', runBacktest);
-      // Update currency label when asset changes
-      const btSymbolSel = document.getElementById('bt-symbol');
+      // Every backtest symbol is USD-quoted.
       const btCurrLabel = document.getElementById('bt-currency-label');
-      function updateBtCurrency() {
-        if (!btSymbolSel || !btCurrLabel) return;
-        const v = btSymbolSel.value;
-        const isInr = v === '^NSEI';
-        btCurrLabel.textContent = isInr ? '₹' : '$';
-      }
-      btSymbolSel?.addEventListener('change', updateBtCurrency);
-      updateBtCurrency();
+      if (btCurrLabel) btCurrLabel.textContent = '$';
 
       // If DB hydration hasn't produced transactions a few seconds in,
       // resolve the P&L skeletons to an explicit empty state.

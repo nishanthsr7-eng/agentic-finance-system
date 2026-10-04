@@ -64,7 +64,9 @@ if __name__ == "__main__":
         print("open_interest: no files yet — run `python scripts/dl_binance.py --oi` (slow).")
     else:
         assert df.duplicated(["symbol", "date"]).sum() == 0, "duplicate (symbol,date) rows"
-        print(f"open interest: {len(df):,} rows over {df.symbol.nunique()} symbols "
-              f"({df.date.min().date()}..{df.date.max().date()})")
+        print(
+            f"open interest: {len(df):,} rows over {df.symbol.nunique()} symbols "
+            f"({df.date.min().date()}..{df.date.max().date()})"
+        )
         print(df[df.symbol == "BTC"].tail(3).to_string(index=False))
         print("OK")

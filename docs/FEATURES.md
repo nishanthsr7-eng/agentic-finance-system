@@ -11,7 +11,7 @@ A complete catalogue of FLUX capabilities, grouped by domain.
 - **Equity quotes** — 15 curated large-cap stocks via Finnhub, fetched
   concurrently with sector metadata and logos.
 - **OHLCV candles** — interactive candlestick data (1D / 7D / 1M / 1Y) for
-  NIFTY, BTC, and ETH via yfinance.
+  BTC, ETH and SPY via yfinance.
 - **Technical indicators** — server-computed Volume (14d avg), RSI(14) with
   Wilder smoothing, and MACD(12,26,9) for any supported symbol.
 - **In-memory caching** — per-asset TTL caches (crypto 30s, stocks 60s, news

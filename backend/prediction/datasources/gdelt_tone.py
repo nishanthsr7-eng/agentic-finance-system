@@ -22,6 +22,7 @@ so the downstream block simply stays neutral, exactly like a crypto symbol with 
     fetch_gdelt_tone(symbols, ...)    -> DataFrame  (re-pull from the API and rewrite the cache)
     GDELT_QUERY                       -> {symbol: free-text query}
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from . import DATASET_DIR, CRYPTO_SYMBOLS, tidy
+from . import CRYPTO_SYMBOLS, DATASET_DIR, tidy
 
 log = logging.getLogger("flux.prediction.datasources.gdelt")
 
@@ -44,16 +45,27 @@ _API = "https://api.gdeltproject.org/api/v2/doc/doc"
 # Distinctive single token / quoted phrase per coin (GDELT ANDs bare words, so multi-word queries
 # crush recall; a quoted phrase requires the exact bigram). Kept as the most identifying single term.
 _CRYPTO_NAME = {
-    "BTC": "bitcoin", "ETH": "ethereum", "BNB": "binance", "SOL": "solana",
-    "XRP": "ripple", "ADA": "cardano", "AVAX": "avalanche", "DOT": "polkadot",
-    "LINK": "chainlink", "LTC": "litecoin", "TRX": "tron", "UNI": "uniswap",
-    "DOGE": "dogecoin", "SHIB": '"shiba inu"',
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "BNB": "binance",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "AVAX": "avalanche",
+    "DOT": "polkadot",
+    "LINK": "chainlink",
+    "LTC": "litecoin",
+    "TRX": "tron",
+    "UNI": "uniswap",
+    "DOGE": "dogecoin",
+    "SHIB": '"shiba inu"',
 }
 
 
 def _equity_query(symbol: str) -> str:
     try:
         from ...ingestion import STOCK_META
+
         name = STOCK_META.get(symbol.upper(), (symbol, ""))[0]
     except Exception:
         name = symbol
@@ -64,6 +76,7 @@ def _build_query_map() -> dict[str, str]:
     out = {s: _CRYPTO_NAME[s] for s in CRYPTO_SYMBOLS if s in _CRYPTO_NAME}
     try:
         from ...ingestion import STOCK_META
+
         for sym in STOCK_META:
             out[sym] = _equity_query(sym)
     except Exception:
@@ -97,37 +110,56 @@ def _compose(query: str) -> str:
     return f"{query} sourcelang:english"
 
 
-def _fetch_one(symbol: str, query: str, start: str, end: str, timeout: float,
-               retries: int = 4, backoff: float = 6.0) -> pd.DataFrame:
+def _fetch_one(
+    symbol: str,
+    query: str,
+    start: str,
+    end: str,
+    timeout: float,
+    retries: int = 4,
+    backoff: float = 6.0,
+) -> pd.DataFrame:
     """One symbol's daily tone timeline; retries the intermittent 429 with linear backoff; empty
     frame on persistent failure (so a partial backfill still proceeds)."""
     import httpx
+
     params = {
         "query": _compose(query),
-        "mode": "timelinetone", "format": "json",
-        "startdatetime": start, "enddatetime": end,
+        "mode": "timelinetone",
+        "format": "json",
+        "startdatetime": start,
+        "enddatetime": end,
     }
     empty = pd.DataFrame(columns=["date", "tone", "vol"])
     for attempt in range(retries):
         try:
-            r = httpx.get(_API, params=params, timeout=timeout,
-                          headers={"User-Agent": "flux-market/0.1 (research)"})
-            if r.status_code == 429:                            # intermittent throttle — back off & retry
+            r = httpx.get(
+                _API,
+                params=params,
+                timeout=timeout,
+                headers={"User-Agent": "flux-market/0.1 (research)"},
+            )
+            if r.status_code == 429:  # intermittent throttle — back off & retry
                 time.sleep(backoff * (attempt + 1))
                 continue
             r.raise_for_status()
             df = _parse_timeline(r.json())
             df["symbol"] = symbol.upper()
             return df
-        except Exception as exc:                                # network / parse
+        except Exception as exc:  # network / parse
             log.warning("GDELT fetch for %s failed (attempt %d): %s", symbol, attempt + 1, exc)
             time.sleep(backoff)
     log.warning("GDELT %s: gave up after %d attempts (throttled)", symbol, retries)
     return empty
 
 
-def fetch_gdelt_tone(symbols: list[str] | None = None, start: str = "20170101000000",
-                     end: str | None = None, pause: float = 1.5, timeout: float = 20.0) -> pd.DataFrame:
+def fetch_gdelt_tone(
+    symbols: list[str] | None = None,
+    start: str = "20170101000000",
+    end: str | None = None,
+    pause: float = 1.5,
+    timeout: float = 20.0,
+) -> pd.DataFrame:
     """Re-pull the daily tone timeline for each symbol from the GDELT API and rewrite the cache.
 
     Polite by default (a short pause between calls); whatever symbols succeed are cached, so a partial
@@ -170,6 +202,7 @@ def load_gdelt_tone() -> pd.DataFrame:
 
 if __name__ == "__main__":
     import sys
+
     do_fetch = "--fetch" in sys.argv or "--rebuild" in sys.argv
     only = [a for a in sys.argv[1:] if not a.startswith("-")]
     if do_fetch:
@@ -182,6 +215,13 @@ if __name__ == "__main__":
     if df.empty:
         print("GDELT tone: no data (run with --fetch to pull, or it was throttled/offline).")
         sys.exit(0)
-    print(f"GDELT tone: {len(df):,} rows over {df.symbol.nunique()} symbols "
-          f"({df.date.min().date()}..{df.date.max().date()})")
-    print(df.groupby("symbol").agg(n=("tone", "size"), mean_tone=("tone", "mean")).round(2).to_string())
+    print(
+        f"GDELT tone: {len(df):,} rows over {df.symbol.nunique()} symbols "
+        f"({df.date.min().date()}..{df.date.max().date()})"
+    )
+    print(
+        df.groupby("symbol")
+        .agg(n=("tone", "size"), mean_tone=("tone", "mean"))
+        .round(2)
+        .to_string()
+    )

@@ -13,12 +13,10 @@ The confidence is the CALIBRATED probability mapped to 0-100, so "62" really mea
 
 from __future__ import annotations
 
-import datetime as dt
 import json
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 log = logging.getLogger("flux.prediction.predict")
@@ -29,10 +27,10 @@ _model = None
 _meta_model = None
 _calibrator = None
 _return_model = None
-_bands = None                 # ConformalBands | None (None until a model is trained with it)
-_stack = None                 # RegimeStacker | None (self-gated: only set if it beats best base OOS)
-_base2 = None                 # dict{model,feature_columns} | None — 2nd base learner for the stack
-_magnitude = None             # MagnitudeLSTM | None (self-gated: only set if it beats predict-zero)
+_bands = None  # ConformalBands | None (None until a model is trained with it)
+_stack = None  # RegimeStacker | None (self-gated: only set if it beats best base OOS)
+_base2 = None  # dict{model,feature_columns} | None — 2nd base learner for the stack
+_magnitude = None  # MagnitudeLSTM | None (self-gated: only set if it beats predict-zero)
 _meta: dict | None = None
 _macro: pd.DataFrame | None = None
 
@@ -41,17 +39,28 @@ _macro: pd.DataFrame | None = None
 # 0.50 → 0.539 at 75%). We deliberately trade fewer, higher-precision signals — the edge here is
 # selectivity, not coverage. Kelly sizing (sizing.kelly_fraction) still scales by meta_prob.
 ACT_THRESHOLD = 0.60
-BAND_ALPHA = 0.2              # default conformal miscoverage → 80% interval
-DRIFT_K = 0.5                 # how far the risk band leans toward the called side per σ of edge;
-                             # small by design so the symmetric conformal coverage stays valid
+BAND_ALPHA = 0.2  # default conformal miscoverage → 80% interval
+WIDE_ALPHA = 0.1  # second, wider range served alongside it → 90% interval
+DRIFT_K = 0.5  # how far the risk band leans toward the called side per σ of edge;
+# small by design so the symmetric conformal coverage stays valid
 
 
 def _load():
-    global _model, _meta_model, _calibrator, _return_model, _bands, _meta, _stack, _base2, _magnitude
+    global \
+        _model, \
+        _meta_model, \
+        _calibrator, \
+        _return_model, \
+        _bands, \
+        _meta, \
+        _stack, \
+        _base2, \
+        _magnitude
     if _model is not None:
         return
-    from xgboost import XGBClassifier, XGBRegressor
     import joblib
+    from xgboost import XGBClassifier, XGBRegressor
+
     _meta = json.loads((MODELS_DIR / "model_meta.json").read_text())
     _model = XGBClassifier()
     _model.load_model(MODELS_DIR / "xgb_primary.json")
@@ -62,6 +71,7 @@ def _load():
     reg_path, band_path = MODELS_DIR / "xgb_return.json", MODELS_DIR / "conformal.pkl"
     if reg_path.exists() and band_path.exists():
         from .conformal import ConformalBands
+
         _return_model = XGBRegressor()
         _return_model.load_model(reg_path)
         _bands = ConformalBands.load(band_path)
@@ -76,16 +86,22 @@ def _load():
     stack_path, base2_path = MODELS_DIR / "regime_stack.pkl", MODELS_DIR / "base2.pkl"
     if stack_path.exists() and base2_path.exists():
         try:
-            from .ensemble import RegimeStacker, GATE_MARGIN
+            from .ensemble import GATE_MARGIN, RegimeStacker
+
             s = RegimeStacker.load(stack_path)
             rep = s.report or {}
-            gate_ok = rep.get("gate6_pass") or \
-                rep.get("stack_auc", 0.0) > rep.get("best_base_auc", 1.0) + GATE_MARGIN
+            gate_ok = (
+                rep.get("gate6_pass")
+                or rep.get("stack_auc", 0.0) > rep.get("best_base_auc", 1.0) + GATE_MARGIN
+            )
             if gate_ok:
                 _base2 = joblib.load(base2_path)
                 _stack = s
-                log.info("Regime stack ENABLED (AUC %.4f > best base %.4f)",
-                         rep.get("stack_auc", float("nan")), rep.get("best_base_auc", float("nan")))
+                log.info(
+                    "Regime stack ENABLED (AUC %.4f > best base %.4f)",
+                    rep.get("stack_auc", float("nan")),
+                    rep.get("best_base_auc", float("nan")),
+                )
             else:
                 log.info("Regime stack present but gated OFF (no OOS lift over best base learner)")
         except Exception as exc:
@@ -97,6 +113,7 @@ def _load():
     if (MODELS_DIR / "magnitude.pt").exists():
         try:
             from .magnitude import MagnitudeLSTM
+
             m = MagnitudeLSTM.load(MODELS_DIR)
             if (m.report or {}).get("beats_zero"):
                 _magnitude = m
@@ -113,12 +130,18 @@ async def _macro_frame() -> pd.DataFrame:
     global _macro
     if _macro is None:
         from .train import build_macro
+
         _macro = await build_macro()
     return _macro
 
 
-async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = True,
-                  with_earnings: bool = True, with_options: bool = True) -> dict | None:
+async def predict(
+    symbol: str,
+    with_sentiment: bool = True,
+    with_regime: bool = True,
+    with_earnings: bool = True,
+    with_options: bool = True,
+) -> dict | None:
     """Produce one calibrated direction prediction for `symbol`."""
     _load()
     from ..db import get_history
@@ -130,12 +153,12 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
         log.warning("No history for %s", symbol)
         return None
 
-    d = _meta["fd_orders"].get(symbol, 0.4)        # symbol's calibrated frac-diff order
+    d = _meta["fd_orders"].get(symbol, 0.4)  # symbol's calibrated frac-diff order
     df = pd.DataFrame(rows)
     feat = build_features_from_df(df, fd_order=d)
 
     macro = await _macro_frame()
-    feat.index = pd.to_datetime(feat.index)          # align string dates with Timestamp macro index
+    feat.index = pd.to_datetime(feat.index)  # align string dates with Timestamp macro index
     feat = feat.join(macro.reindex(feat.index, method="ffill"))
     feat["rs_1"] = feat["logret_1"] - feat["spx_ret1"]
     feat["rs_5"] = feat["logret_5"] - feat["spx_ret5"]
@@ -144,7 +167,7 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
         return None
 
     cols = _meta["feature_columns"]
-    x = feat[cols].iloc[[-1]]                       # most recent fully-formed row
+    x = feat[cols].iloc[[-1]]  # most recent fully-formed row
     as_of = feat.index[-1]
     last_close = float(feat["close"].iloc[-1])
 
@@ -167,6 +190,7 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
             regime_probs = {"trend": 1.0, "chop": 0.0, "risk_off": 0.0}
             if with_regime:
                 from .regime import current_regime
+
                 regime_probs = (await current_regime())["probs"]
             prob_up = _stack.predict_proba(
                 {"primary_cal": prob_up, "p2_base": p2, "meta_prob": meta_prob, "mag_oof": mag_pt},
@@ -176,7 +200,7 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
             log.warning("stack blend failed for %s: %s", symbol, exc)
 
     direction = "UP" if prob_up >= 0.5 else "DOWN"
-    base_conf = meta_prob * 100                              # P(correct) → 0..100 confidence
+    base_conf = meta_prob * 100  # P(correct) → 0..100 confidence
     horizon = int(_meta["horizon"])
     target_date = (pd.Timestamp(as_of) + pd.tseries.offsets.BDay(horizon)).date()
 
@@ -190,24 +214,30 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
     #     construction (≪ the band half-width), so the conformal coverage — calibrated as a symmetric
     #     band with ŷ≈0 — is preserved. This is a pure risk band, presented honestly as one.
     pred_return = pred_price = conf_low = conf_high = None
+    conf_low_90 = conf_high_90 = None
     band_cov = None
     band_kind = None
     if _bands is not None:
         from .garch import forecast_h_vol
-        scale = forecast_h_vol(feat["close"], horizon)      # GARCH h-day σ (causal, today-anchored)
+
+        scale = forecast_h_vol(feat["close"], horizon)  # GARCH h-day σ (causal, today-anchored)
         if _magnitude is not None:
             try:
                 pred_return = float(_magnitude.predict_seq(feat[_magnitude.columns]))
                 band_kind = "magnitude_head"
             except Exception as exc:
                 log.warning("magnitude predict failed for %s: %s", symbol, exc)
-        if pred_return is None:                             # honest default: direction-implied drift
+        if pred_return is None:  # honest default: direction-implied drift
             pred_return = (2.0 * prob_up - 1.0) * float(scale) * DRIFT_K
-            band_kind = "risk_band"                         # center is a lean, not a point forecast
+            band_kind = "risk_band"  # center is a lean, not a point forecast
         ret_lo, ret_hi = _bands.interval(pred_return, scale, alpha=BAND_ALPHA)
         pred_price = round(last_close * (1 + pred_return), 4)
         conf_low = round(last_close * (1 + ret_lo), 4)
         conf_high = round(last_close * (1 + ret_hi), 4)
+        if WIDE_ALPHA in _bands.q:  # older conformal.pkl may lack it
+            w_lo, w_hi = _bands.interval(pred_return, scale, alpha=WIDE_ALPHA)
+            conf_low_90 = round(last_close * (1 + w_lo), 4)
+            conf_high_90 = round(last_close * (1 + w_hi), 4)
         band_cov = round(_bands.coverage.get(BAND_ALPHA, float("nan")), 4)
         pred_return = round(pred_return, 6)
 
@@ -216,13 +246,14 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
     if with_sentiment:
         try:
             from .sentiment import symbol_sentiment
+
             sent = await symbol_sentiment(symbol)
         except Exception as exc:
             log.warning("sentiment unavailable for %s: %s", symbol, exc)
 
     # Agreement: +1 if sentiment sign matches model direction, -1 if it opposes.
     dir_sign = 1 if direction == "UP" else -1
-    agree = dir_sign * sent["score"]                        # >0 agree, <0 disagree
+    agree = dir_sign * sent["score"]  # >0 agree, <0 disagree
     # Scale confidence: strong agreement up to +20%, strong disagreement down to -40%.
     factor = 1.0 + (0.20 * agree if agree >= 0 else 0.40 * agree)
     factor = max(0.5, min(1.2, factor))
@@ -232,17 +263,20 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
     regime, regime_probs = "trend", {}
     if with_regime:
         try:
-            from .regime import current_regime, REGIME_SCALE
+            from .regime import REGIME_SCALE, current_regime
             from .sizing import kelly_fraction
+
             rg = await current_regime()
             regime, regime_probs = rg["regime"], rg["probs"]
             kelly = kelly_fraction(meta_prob) * REGIME_SCALE.get(regime, 1.0)
         except Exception as exc:
             log.warning("regime unavailable for %s: %s", symbol, exc)
             from .sizing import kelly_fraction
+
             kelly = kelly_fraction(meta_prob)
     else:
         from .sizing import kelly_fraction
+
         kelly = kelly_fraction(meta_prob)
 
     result = {
@@ -258,15 +292,19 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
         "pred_price": pred_price,
         "conf_low": conf_low,
         "conf_high": conf_high,
+        "conf_low_90": conf_low_90,
+        "conf_high_90": conf_high_90,
         "band_pct": int(round((1 - BAND_ALPHA) * 100)),
         "band_coverage": band_cov,
-        "band_kind": band_kind,                             # 'magnitude_head' | 'risk_band' | None
-
+        "band_kind": band_kind,  # 'magnitude_head' | 'risk_band' | None
         "sentiment": sent["score"],
         "sentiment_label": sent["label"],
         "sentiment_n": sent["n"],
         "regime": regime,
-        "iv_atm": None, "iv_skew": None, "iv_term": None, "iv_as_of": None,
+        "iv_atm": None,
+        "iv_skew": None,
+        "iv_term": None,
+        "iv_as_of": None,
         "kelly_frac": round(kelly, 4),
         "horizon_days": horizon,
         "as_of": str(pd.Timestamp(as_of).date()),
@@ -280,7 +318,8 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
     # ── Earnings-window gate (Phase 3.1): halve confidence/size if earnings within the horizon ──
     if with_earnings:
         try:
-            from .earnings import earnings_gate, apply_gate
+            from .earnings import apply_gate, earnings_gate
+
             gate = await earnings_gate(symbol, horizon=horizon, as_of=result["as_of"])
             result = apply_gate(result, gate)
         except Exception as exc:
@@ -293,10 +332,17 @@ async def predict(symbol: str, with_sentiment: bool = True, with_regime: bool = 
     if with_options:
         try:
             from .options import symbol_iv
+
             iv = await symbol_iv(symbol)
             if iv["available"]:
-                result.update({"iv_atm": iv["atm_iv"], "iv_skew": iv["skew"],
-                               "iv_term": iv["term_slope"], "iv_as_of": iv["as_of"]})
+                result.update(
+                    {
+                        "iv_atm": iv["atm_iv"],
+                        "iv_skew": iv["skew"],
+                        "iv_term": iv["term_slope"],
+                        "iv_as_of": iv["as_of"],
+                    }
+                )
         except Exception as exc:
             log.warning("options IV unavailable for %s: %s", symbol, exc)
 
@@ -309,6 +355,7 @@ async def predict_all(symbols: list[str] | None = None) -> list[dict]:
     if symbols is None:
         from ..db import history_summary
         from .train import EXCLUDE
+
         symbols = [r["symbol"] for r in await history_summary() if r["symbol"] not in EXCLUDE]
     out = []
     for s in symbols:
@@ -325,6 +372,7 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path as _P
+
     sys.path.insert(0, str(_P(__file__).resolve().parents[2]))
 
     async def _demo():
