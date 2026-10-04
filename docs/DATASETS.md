@@ -37,7 +37,7 @@ python scripts/backfill_history.py
 ```
 
 - Pulls `period="max"` daily OHLCV via yfinance for all 15 stocks, 15 crypto,
-  and macro series (S&P 500, VIX, 10Y yield), plus NIFTY.
+  and macro series (S&P 500, VIX, 10Y yield).
 - Upserts on `(symbol, date)`, so re-running is safe and idempotent.
 - Use `--symbols AAPL BTC` to backfill a subset for a smoke test.
 

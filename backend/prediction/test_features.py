@@ -25,7 +25,8 @@ from backend.prediction.labeling import make_labels
 
 
 async def _load_df(symbol: str = "AAPL") -> pd.DataFrame:
-    from backend.db import init_db, get_history
+    from backend.db import get_history, init_db
+
     await init_db()
     return pd.DataFrame(await get_history(symbol))
 
@@ -48,14 +49,16 @@ def _check_no_target_leakage(df: pd.DataFrame) -> None:
 def _check_causality_truncation_invariance(df: pd.DataFrame) -> None:
     full = build_features_from_df(df)
     cut = int(len(df) * 0.7)
-    truncated = build_features_from_df(df.iloc[:cut])      # hide everything after `cut`
+    truncated = build_features_from_df(df.iloc[:cut])  # hide everything after `cut`
     common = full.index.intersection(truncated.index)
-    common = common[-200:]                                  # check the last 200 shared rows
+    common = common[-200:]  # check the last 200 shared rows
     cols = feature_columns(full)
     a = full.loc[common, cols].to_numpy()
     b = truncated.loc[common, cols].to_numpy()
     max_diff = np.nanmax(np.abs(a - b))
-    assert max_diff < 1e-9, f"Feature values changed when future data removed (d={max_diff:.2e}) -> LEAK"
+    assert max_diff < 1e-9, (
+        f"Feature values changed when future data removed (d={max_diff:.2e}) -> LEAK"
+    )
     print(f"  [2] causality-invariance   OK   (max delta = {max_diff:.2e})")
 
 
@@ -94,14 +97,26 @@ def _run() -> None:
 def _df():
     df = asyncio.run(_load_df("AAPL"))
     if df.empty:
-        pytest.skip("no seeded market data for AAPL (flux_market.db not populated in this environment)")
+        pytest.skip(
+            "no seeded market data for AAPL (flux_market.db not populated in this environment)"
+        )
     return df
 
 
-def test_leakage():            _check_no_target_leakage(_df())
-def test_causality():          _check_causality_truncation_invariance(_df())
-def test_clean():              _check_no_nan_inf(_df())
-def test_labels():             _check_label_t1_ordering(_df())
+def test_leakage():
+    _check_no_target_leakage(_df())
+
+
+def test_causality():
+    _check_causality_truncation_invariance(_df())
+
+
+def test_clean():
+    _check_no_nan_inf(_df())
+
+
+def test_labels():
+    _check_label_t1_ordering(_df())
 
 
 if __name__ == "__main__":

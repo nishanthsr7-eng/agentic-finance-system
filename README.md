@@ -1,21 +1,13 @@
 <div align="center">
 
-# FLUX — Agentic Finance System
+# Agentic AI Finance & Stock Prediction System
 
 **An AI-powered finance platform: a calibrated machine-learning market-prediction agent behind a full digital-wallet experience.**
-
-[![CI](https://github.com/nishanthsr7-eng/FLUX-Agentic_Finance_System/actions/workflows/ci.yml/badge.svg)](https://github.com/nishanthsr7-eng/FLUX-Agentic_Finance_System/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-3fb950.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![XGBoost](https://img.shields.io/badge/XGBoost-EC4E20)](https://xgboost.readthedocs.io/)
-[![Paper trading only](https://img.shields.io/badge/trading-paper%20only-8957e5.svg)](#disclaimer)
-[![Live demo](https://img.shields.io/badge/live%20demo-nishanth--flux.pages.dev-2ea043.svg)](https://nishanth-flux.pages.dev)
 
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/landing.png" alt="FLUX landing page" width="100%">
+  <img src="docs/screenshots/landing.png" alt="Agentic AI Finance & Stock Prediction System landing page" width="100%">
 </p>
 
 ---
@@ -54,12 +46,52 @@ verifier with veto power over the model's own call.
 
 ---
 
+## Results
+
+Daily direction is close to unpredictable. The contribution here is a leak-free
+pipeline and calibrated uncertainty, not alpha.
+
+Out-of-fold numbers from purged, embargoed walk-forward cross-validation:
+133,753 predictions over 29 symbols, 5-day triple-barrier labels, data to
+2026-10-03 (`backend/prediction/models/model_meta.json`).
+
+| Model | Accuracy | AUC |
+|---|---|---|
+| FLUX-X (XGBoost) | 0.528 | 0.522 |
+| Always-up baseline | **0.531** | — |
+| Persistence (tomorrow = today) | 0.496 | — |
+
+- **Accuracy:** the model does not beat always-up. Markets drift up, so 53% of
+  the labels are UP.
+- **Ranking:** AUC above 0.5 means there is a small ranking signal. On its 10%
+  most confident calls the model is right 55.1% of the time (+2.0 points over
+  always-up), and 56.0% on the top 5%. The meta-model's "act" filter keeps 12.8%
+  of calls at 54.4% precision, versus 53.5% when acting on every call.
+- **Calibration:** expected calibration error is 0.031 raw and 0.022 after
+  isotonic calibration. Each walk-forward fold is scored with a calibrator fit
+  only on earlier folds. An earlier version reported ~0, because it scored the
+  calibrator on the same predictions it was fit on.
+- **Uncertainty bands:** the 80% and 90% conformal return bands cover 80.0% and
+  90.0% of outcomes out of fold.
+- **Price point forecast:** the predicted 5-day return misses by 5.41% on
+  average, versus 5.35% for assuming no change, so it has no skill. The Advisor
+  shows the range as the headline and the central estimate greyed out.
+- **Regime-conditional stack:** with every input calibrated out of sample it
+  does not beat the plain model (AUC 0.536 vs 0.537), so it stays switched off.
+- **ARIMA(1,0,0):** 53.1% on its own sample of 1,189 points, 1.3 points *below*
+  always-up on that sample. An earlier run showed 57%. A check found no leak: on
+  the same sample ARIMA agreed 95% of the time with "the sign of the trailing
+  500-day average return", so that number was market drift, not forecasting skill.
+
+---
+
 ## Screenshots
 
 ### Smart Advisor — the prediction cockpit
 
 The agent's directional call, calibrated confidence, Kelly-sized position, and
-the GARCH-shaped 80% conformal band projected forward from live price. The
+the 5-day outlook: the 80% and 90% price ranges re-based to the live price,
+with a live range hit rate. The
 conviction board ranks every tracked asset; **Model Trust** plots stated
 confidence against realized hit rate.
 

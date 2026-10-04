@@ -20,6 +20,7 @@ then re-run this gate. Per the honesty contract the block stays self-gated OFF u
 
     python scripts/gate5_sentiment_eval.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,8 +41,11 @@ def _auc_pair(y, base, aug, mask):
     yt = y[common]
     if yt.size == 0 or yt.min() == yt.max():
         return float("nan"), float("nan"), int(common.sum())
-    return (float(roc_auc_score(yt, base[common])),
-            float(roc_auc_score(yt, aug[common])), int(common.sum()))
+    return (
+        float(roc_auc_score(yt, base[common])),
+        float(roc_auc_score(yt, aug[common])),
+        int(common.sum()),
+    )
 
 
 async def _main():
@@ -49,28 +53,38 @@ async def _main():
     os.environ.setdefault("FLUX_CRYPTO_FEATURES", "0")
     os.environ.setdefault("FLUX_EQUITY_FEATURES", "0")
 
-    from backend.prediction.train import load_dataset, evaluate_oof
-    from backend.prediction.sentiment_features import SENTIMENT_FEATURE_COLS
     from backend.prediction.datasources import CRYPTO_SYMBOLS
+    from backend.prediction.sentiment_features import SENTIMENT_FEATURE_COLS
+    from backend.prediction.train import evaluate_oof, load_dataset
 
     X, y, w, t1, feat_cols, _fd, data = await load_dataset()
     sent_cols = [c for c in feat_cols if c in SENTIMENT_FEATURE_COLS]
     base_cols = [c for c in feat_cols if c not in SENTIMENT_FEATURE_COLS]
-    assert sent_cols, "sentiment block not present - is FLUX_SENTIMENT_FEATURES respected in load_dataset?"
+    assert sent_cols, (
+        "sentiment block not present - is FLUX_SENTIMENT_FEATURES respected in load_dataset?"
+    )
 
     coverage = int((data[sent_cols].abs().to_numpy() > 1e-9).any(axis=1).sum())
     crypto = data["_sym"].isin(CRYPTO_SYMBOLS).values
     equity = ~crypto
     classes = {"equity": equity, "crypto": crypto, "pooled": np.ones(len(y), bool)}
-    print(f"Panel: {len(X):,} events ({equity.sum():,} equity / {crypto.sum():,} crypto) | "
-          f"base {len(base_cols)} + sentiment {len(sent_cols)} feats {sent_cols}")
-    print(f"Sentiment coverage: {coverage:,}/{len(X):,} rows have a non-neutral sentiment value "
-          f"({coverage / len(X):.1%})\n")
+    print(
+        f"Panel: {len(X):,} events ({equity.sum():,} equity / {crypto.sum():,} crypto) | "
+        f"base {len(base_cols)} + sentiment {len(sent_cols)} feats {sent_cols}"
+    )
+    print(
+        f"Sentiment coverage: {coverage:,}/{len(X):,} rows have a non-neutral sentiment value "
+        f"({coverage / len(X):.1%})\n"
+    )
 
     if coverage == 0:
         print("=" * 72)
-        print("  GATE-5: NO SENTIMENT COVERAGE in the caches -> block is all-neutral -> AUG == BASE.")
-        print("  This is a TIE FOR LACK OF DATA, not a dead signal. Back-fill the streams and re-run:")
+        print(
+            "  GATE-5: NO SENTIMENT COVERAGE in the caches -> block is all-neutral -> AUG == BASE."
+        )
+        print(
+            "  This is a TIE FOR LACK OF DATA, not a dead signal. Back-fill the streams and re-run:"
+        )
         print("    python -m backend.prediction.datasources.gdelt_tone --fetch")
         print("    python -m backend.prediction.datasources.av_news   --fetch")
         print("  Block stays self-gated OFF (FLUX_SENTIMENT_FEATURES=0) until it shows real lift.")
@@ -96,7 +110,9 @@ async def _main():
     # complement — does the sentiment feature make the OOF probabilities better calibrated?)
     base_ece, aug_ece = base_res["ece_raw"], aug_res["ece_raw"]
     print("\n  GATE-5(b) proxy - OOF calibration (ECE, lower is better):")
-    print(f"    base ECE {base_ece:.4f}  ->  +sent ECE {aug_ece:.4f}   delta {aug_ece - base_ece:+.4f}")
+    print(
+        f"    base ECE {base_ece:.4f}  ->  +sent ECE {aug_ece:.4f}   delta {aug_ece - base_ece:+.4f}"
+    )
 
     pooled_delta = deltas["pooled"]
     print("\n" + "-" * 72)
@@ -107,8 +123,10 @@ async def _main():
     else:
         verdict = "FAIL - sentiment hurts OOF AUC; keep self-gated OFF"
     print(f"  GATE-5(a) (pooled AUC >= prior): delta {pooled_delta:+.4f} -> {verdict}")
-    print(f"  GATE-5(b) (ECE not worse):        delta {aug_ece - base_ece:+.4f} -> "
-          f"{'OK' if aug_ece <= base_ece + 1e-4 else 'calibration worse'}")
+    print(
+        f"  GATE-5(b) (ECE not worse):        delta {aug_ece - base_ece:+.4f} -> "
+        f"{'OK' if aug_ece <= base_ece + 1e-4 else 'calibration worse'}"
+    )
 
 
 if __name__ == "__main__":

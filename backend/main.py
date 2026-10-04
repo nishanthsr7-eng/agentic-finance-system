@@ -35,39 +35,45 @@ Start
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import httpx
 import yfinance as yf
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-from .config import settings
-from .cache import cache
-from .db import (
-    init_db,
-    get_latest_snapshots,
-    get_symbol_history,
-    get_ohlcv,
-    get_latest_insights,
-    get_recent_news,
-    get_ingestion_log,
-    get_latest_predictions,
-    get_prediction_history,
-    get_calibration_buckets,
-)
-from .rag import init_chroma, rag_query, chroma_stats, embed_market_snapshots, embed_news
-from .user_api import db_router
-from .trading_api import trading_router, ensure_trading_schema
-from .payments_api import payments_router, ensure_payments_schema
-from .auth import auth_router, ensure_auth_schema, require_user
 from . import llm
+from .auth import auth_router, ensure_auth_schema, is_admin, require_admin, require_user
+from .cache import cache
+from .config import settings
+from .db import (
+    get_calibration_buckets,
+    get_ingestion_log,
+    get_latest_insights,
+    get_latest_predictions,
+    get_latest_snapshots,
+    get_ohlcv,
+    get_prediction_history,
+    get_recent_news,
+    get_symbol_history,
+    init_db,
+)
+from .payments_api import payments_router
+from .rag import chroma_stats, embed_market_snapshots, init_chroma, rag_query
+from .ratelimit import rate_limit
+from .trading_api import trading_router
+from .user_api import db_router
+
+# One shared per-IP allowance for every route that spends LLM quota.
+_AI_LIMIT = Depends(rate_limit("ai", 20, 60))
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
@@ -75,15 +81,15 @@ log = logging.getLogger("flux.api")
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="FLUX Market API",
+    title="Agentic AI Finance & Stock Prediction System API",
     version="1.0.0",
-    description="Live market data bridge for the FLUX Finance dashboard.",
+    description="Market data, predictions and paper trading for the Agentic AI Finance & Stock Prediction System.",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],  # DELETE: watchlist + alerts
     allow_headers=["*"],
 )
 
@@ -114,39 +120,66 @@ app.include_router(auth_router)
 
 # CoinGecko IDs — ranked by market cap
 CRYPTO_IDS = [
-    "bitcoin", "ethereum", "tether", "binancecoin", "solana",
-    "ripple", "dogecoin", "cardano", "avalanche-2", "polkadot",
-    "chainlink", "uniswap", "litecoin", "shiba-inu", "tron",
+    "bitcoin",
+    "ethereum",
+    "tether",
+    "binancecoin",
+    "solana",
+    "ripple",
+    "dogecoin",
+    "cardano",
+    "avalanche-2",
+    "polkadot",
+    "chainlink",
+    "uniswap",
+    "litecoin",
+    "shiba-inu",
+    "tron",
 ]
 
 # Stocks: symbols + static metadata (sector rarely changes)
 STOCK_META: dict[str, dict] = {
-    "AAPL":  {"name": "Apple Inc.",          "sector": "Technology"},
-    "MSFT":  {"name": "Microsoft Corp.",      "sector": "Technology"},
-    "NVDA":  {"name": "NVIDIA Corp.",         "sector": "Semiconductors"},
-    "GOOGL": {"name": "Alphabet Inc.",        "sector": "Technology"},
-    "AMZN":  {"name": "Amazon.com Inc.",      "sector": "Consumer"},
-    "TSLA":  {"name": "Tesla Inc.",           "sector": "Automotive"},
-    "META":  {"name": "Meta Platforms",       "sector": "Technology"},
-    "NFLX":  {"name": "Netflix Inc.",         "sector": "Media"},
-    "JPM":   {"name": "JPMorgan Chase",       "sector": "Financials"},
-    "AMD":   {"name": "Advanced Micro Dev.",  "sector": "Semiconductors"},
-    "TSM":   {"name": "Taiwan Semiconductor", "sector": "Semiconductors"},
-    "ORCL":  {"name": "Oracle Corp.",         "sector": "Technology"},
-    "CRM":   {"name": "Salesforce Inc.",      "sector": "Software"},
-    "INTC":  {"name": "Intel Corp.",          "sector": "Semiconductors"},
-    "BABA":  {"name": "Alibaba Group",        "sector": "Consumer"},
+    "AAPL": {"name": "Apple Inc.", "sector": "Technology"},
+    "MSFT": {"name": "Microsoft Corp.", "sector": "Technology"},
+    "NVDA": {"name": "NVIDIA Corp.", "sector": "Semiconductors"},
+    "GOOGL": {"name": "Alphabet Inc.", "sector": "Technology"},
+    "AMZN": {"name": "Amazon.com Inc.", "sector": "Consumer"},
+    "TSLA": {"name": "Tesla Inc.", "sector": "Automotive"},
+    "META": {"name": "Meta Platforms", "sector": "Technology"},
+    "NFLX": {"name": "Netflix Inc.", "sector": "Media"},
+    "JPM": {"name": "JPMorgan Chase", "sector": "Financials"},
+    "AMD": {"name": "Advanced Micro Dev.", "sector": "Semiconductors"},
+    "TSM": {"name": "Taiwan Semiconductor", "sector": "Semiconductors"},
+    "ORCL": {"name": "Oracle Corp.", "sector": "Technology"},
+    "CRM": {"name": "Salesforce Inc.", "sector": "Software"},
+    "INTC": {"name": "Intel Corp.", "sector": "Semiconductors"},
+    "BABA": {"name": "Alibaba Group", "sector": "Consumer"},
 }
 
 STOCK_SYMBOLS = list(STOCK_META.keys())
 
 # Financial Modeling Prep image CDN — purpose-built stock logos, no auth required
 _FMP = "https://financialmodelingprep.com/image-stock"
-STOCK_LOGOS: dict[str, str] = {sym: f"{_FMP}/{sym}.png" for sym in [
-    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN",
-    "TSLA", "META", "NFLX", "JPM",  "AMD",
-    "TSM",  "ORCL", "CRM",  "INTC", "BABA",
-]}
+STOCK_LOGOS: dict[str, str] = {
+    sym: f"{_FMP}/{sym}.png"
+    for sym in [
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "GOOGL",
+        "AMZN",
+        "TSLA",
+        "META",
+        "NFLX",
+        "JPM",
+        "AMD",
+        "TSM",
+        "ORCL",
+        "CRM",
+        "INTC",
+        "BABA",
+    ]
+}
 
 # ── HTTP Client ───────────────────────────────────────────────────────────────
 # Shared client — reuses TCP connections across requests
@@ -160,7 +193,7 @@ def get_client() -> httpx.AsyncClient:
     return _http_client
 
 
-_scheduler = None   # APScheduler instance
+_scheduler = None  # APScheduler instance
 
 
 def _cached_assets() -> list[dict]:
@@ -173,18 +206,18 @@ def _cached_assets() -> list[dict]:
     stocks = cache.get("stocks") or []
     return [
         {
-            "symbol":     a["sub"],
-            "name":       a["name"],
-            "price":      a["price"],
+            "symbol": a["sub"],
+            "name": a["name"],
+            "price": a["price"],
             "change_pct": a["change_pct"],
             "asset_type": "crypto",
         }
         for a in crypto
     ] + [
         {
-            "symbol":     a["sub"],
-            "name":       a["name"],
-            "price":      a["price"],
+            "symbol": a["sub"],
+            "name": a["name"],
+            "price": a["price"],
             "change_pct": a["change_pct"],
             "asset_type": "stock",
         }
@@ -200,6 +233,7 @@ async def _insight_job() -> None:
     /ai/insights/refresh and /ingestion/trigger/insights routes call.
     """
     from .insights import run_insight_cycle
+
     all_assets = _cached_assets()
     if not all_assets:
         log.debug("Insight job skipped — cache not warm yet")
@@ -212,12 +246,12 @@ async def _insight_job() -> None:
 
 @app.on_event("startup")
 async def startup_event():
-    # 0. Auth schema (users.password_hash) + demo-user credential seed
+    # 0. MySQL schema migrations (backend/migrations), then the demo-user
+    #    credential seed that needs users.password_hash to exist.
+    from .migrate import run_migrations_safely
+
+    run_migrations_safely()
     ensure_auth_schema()
-    # 0b. Marketplace trading tables (wallet, watchlist, alerts)
-    ensure_trading_schema()
-    # 0c. Payments schema (accounts.credit_limit)
-    ensure_payments_schema()
 
     # 1. SQLite schema
     await init_db()
@@ -232,6 +266,7 @@ async def startup_event():
     # 3. Build and start the scheduler. The insight cycle is passed in and
     #    chained onto the market cycle there — see ingestion.build_scheduler.
     from .ingestion import build_scheduler
+
     global _scheduler
     _scheduler = build_scheduler(insight_job_fn=_insight_job)
     _scheduler.start()
@@ -247,9 +282,15 @@ async def shutdown_event():
     if _http_client and not _http_client.is_closed:
         await _http_client.aclose()
     from .ingestion import close_client as _close_ingest_client
+
     await _close_ingest_client()
+    from .mysql_db import close_pool
+
+    close_pool()
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -258,7 +299,9 @@ def _now_iso() -> str:
 def _wrap(assets: list[dict], source: str, cached: bool) -> dict:
     return {"assets": assets, "source": source, "cached": cached, "timestamp": _now_iso()}
 
+
 # ── Crypto Fetcher ────────────────────────────────────────────────────────────
+
 
 async def _fetch_crypto_live() -> list[dict]:
     """Fetch top coins from CoinGecko /coins/markets."""
@@ -287,21 +330,25 @@ async def _fetch_crypto_live() -> list[dict]:
     assets = []
     for coin in coins:
         symbol_short = (coin.get("symbol") or "").upper()
-        assets.append({
-            "symbol":     f"BINANCE:{symbol_short}USDT",
-            "name":       coin.get("name", symbol_short),
-            "sub":        symbol_short,
-            "price":      float(coin.get("current_price") or 0),
-            "change_pct": float(coin.get("price_change_percentage_24h") or 0),
-            "market_cap": float(coin.get("market_cap") or 0),
-            "icon":       coin.get("image", ""),
-            "sector":     "",
-            "sparkline_7d": (coin.get("sparkline_in_7d") or {}).get("price", []),
-        })
+        assets.append(
+            {
+                "symbol": f"BINANCE:{symbol_short}USDT",
+                "name": coin.get("name", symbol_short),
+                "sub": symbol_short,
+                "price": float(coin.get("current_price") or 0),
+                "change_pct": float(coin.get("price_change_percentage_24h") or 0),
+                "market_cap": float(coin.get("market_cap") or 0),
+                "icon": coin.get("image", ""),
+                "sector": "",
+                "sparkline_7d": (coin.get("sparkline_in_7d") or {}).get("price", []),
+            }
+        )
     log.info("CoinGecko: fetched %d coins", len(assets))
     return assets
 
+
 # ── Stocks Fetcher ────────────────────────────────────────────────────────────
+
 
 async def _fetch_single_stock(client: httpx.AsyncClient, symbol: str) -> dict | None:
     """Fetch a single Finnhub quote. Returns None on error."""
@@ -316,18 +363,18 @@ async def _fetch_single_stock(client: httpx.AsyncClient, symbol: str) -> dict | 
         price = float(q.get("c") or 0)
         if price == 0:
             return None  # market closed / bad symbol — skip
-        prev  = float(q.get("pc") or price)
-        chg   = ((price - prev) / prev * 100) if prev else 0
-        meta  = STOCK_META.get(symbol, {"name": symbol, "sector": "—"})
+        prev = float(q.get("pc") or price)
+        chg = ((price - prev) / prev * 100) if prev else 0
+        meta = STOCK_META.get(symbol, {"name": symbol, "sector": "—"})
         return {
-            "symbol":     symbol,
-            "name":       meta["name"],
-            "sub":        symbol,
-            "price":      price,
+            "symbol": symbol,
+            "name": meta["name"],
+            "sub": symbol,
+            "price": price,
             "change_pct": round(chg, 3),
             "market_cap": 0,
-            "icon":       STOCK_LOGOS.get(symbol, ""),
-            "sector":     meta["sector"],
+            "icon": STOCK_LOGOS.get(symbol, ""),
+            "sector": meta["sector"],
         }
     except Exception as exc:
         log.warning("Finnhub %s failed: %s", symbol, exc)
@@ -337,13 +384,15 @@ async def _fetch_single_stock(client: httpx.AsyncClient, symbol: str) -> dict | 
 async def _fetch_stocks_live() -> list[dict]:
     """Fetch all stock quotes concurrently from Finnhub."""
     client = get_client()
-    tasks  = [_fetch_single_stock(client, sym) for sym in STOCK_SYMBOLS]
+    tasks = [_fetch_single_stock(client, sym) for sym in STOCK_SYMBOLS]
     results = await asyncio.gather(*tasks)
-    assets  = [r for r in results if r is not None]
+    assets = [r for r in results if r is not None]
     log.info("Finnhub: fetched %d/%d stocks", len(assets), len(STOCK_SYMBOLS))
     return assets
 
+
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @app.get("/market/summary")
 async def market_summary():
@@ -374,20 +423,22 @@ async def market_summary():
 
     def _strip(a: dict, category: str) -> dict:
         return {
-            "symbol":     a.get("symbol"),
-            "name":       a.get("name"),
-            "sub":        a.get("sub"),
-            "price":      a.get("price"),
+            "symbol": a.get("symbol"),
+            "name": a.get("name"),
+            "sub": a.get("sub"),
+            "price": a.get("price"),
             "change_pct": a.get("change_pct"),
-            "icon":       a.get("icon"),
-            "category":   category,
+            "icon": a.get("icon"),
+            "category": category,
         }
 
-    highlights = [_strip(a, "crypto") for a in top_crypto] + [_strip(a, "stocks") for a in top_stocks]
+    highlights = [_strip(a, "crypto") for a in top_crypto] + [
+        _strip(a, "stocks") for a in top_stocks
+    ]
     return {"highlights": highlights, "timestamp": _now_iso()}
 
 
-@app.post("/cache/flush")
+@app.post("/cache/flush", dependencies=[Depends(require_admin)])
 async def cache_flush():
     """Invalidate all market quote caches so the next request fetches fresh data."""
     for key in ("crypto", "stocks"):
@@ -401,11 +452,12 @@ async def cache_flush():
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     from .ingestion import get_status as ingestion_status
+
     sched_jobs = []
     if _scheduler and _scheduler.running:
         sched_jobs = [
             {
-                "id":       j.id,
+                "id": j.id,
                 "next_run": j.next_run_time.isoformat() if j.next_run_time else None,
             }
             for j in _scheduler.get_jobs()
@@ -413,28 +465,29 @@ async def health():
     agent_ok, agent_model = await llm.health()
 
     return {
-        "status":    "ok",
-        "cache":     cache.stats(),
-        "chroma":    chroma_stats(),
+        "status": "ok",
+        "cache": cache.stats(),
+        "chroma": chroma_stats(),
         "scheduler": {
             "running": bool(_scheduler and _scheduler.running),
-            "jobs":    sched_jobs,
+            "jobs": sched_jobs,
         },
         "ingestion": ingestion_status(),
         "agent": {
             "available": agent_ok,
-            "model":     agent_model,
-            "provider":  llm.provider(),
+            "model": agent_model,
+            "provider": llm.provider(),
         },
         "keys": {
             "coingecko": bool(settings.COINGECKO_API_KEY),
-            "finnhub":   bool(settings.FINNHUB_API_KEY),
-            "newsapi":   bool(settings.NEWSAPI_KEY),
+            "finnhub": bool(settings.FINNHUB_API_KEY),
+            "newsapi": bool(settings.NEWSAPI_KEY),
         },
     }
 
 
 # ── §A: Persisted Market Data Endpoints ──────────────────────────────────────
+
 
 @app.get("/data/snapshots")
 async def data_snapshots(limit: int = Query(50, ge=1, le=500)):
@@ -450,8 +503,7 @@ async def data_history(
 ):
     """Price history for a specific symbol from SQLite."""
     rows = await get_symbol_history(symbol.upper(), limit)
-    return {"symbol": symbol.upper(), "history": rows,
-            "count": len(rows), "timestamp": _now_iso()}
+    return {"symbol": symbol.upper(), "history": rows, "count": len(rows), "timestamp": _now_iso()}
 
 
 @app.get("/data/ohlcv/{symbol}")
@@ -461,8 +513,7 @@ async def data_ohlcv(
 ):
     """30-day daily OHLCV from SQLite (persisted by scheduler)."""
     rows = await get_ohlcv(symbol.upper(), days)
-    return {"symbol": symbol.upper(), "ohlcv": rows,
-            "count": len(rows), "timestamp": _now_iso()}
+    return {"symbol": symbol.upper(), "ohlcv": rows, "count": len(rows), "timestamp": _now_iso()}
 
 
 @app.get("/data/news")
@@ -487,42 +538,62 @@ async def predict_calibration(model: str = "live"):
     return {"model": model, "buckets": rows, "timestamp": _now_iso()}
 
 
-@app.post("/predict/run")
+@app.post("/predict/run", dependencies=[Depends(require_admin)])
 async def predict_run(symbol: str | None = Query(None)):
     """Generate + persist predictions now (one symbol or all). Also resolves matured ones."""
-    from .prediction.serve import run_predictions, resolve_due
+    from .prediction.serve import resolve_due, run_predictions
+
     resolved = await resolve_due()
     preds = await run_predictions([symbol.upper()] if symbol else None)
-    return {"resolved": resolved, "logged": len(preds),
-            "predictions": preds, "timestamp": _now_iso()}
+    return {
+        "resolved": resolved,
+        "logged": len(preds),
+        "predictions": preds,
+        "timestamp": _now_iso(),
+    }
 
 
 @app.get("/predict/verdicts")
 async def predict_verdicts(limit: int = Query(50, ge=1, le=200)):
     """Latest verifier verdict per symbol — feeds leaderboard VETO/downgrade badges."""
     from .db import get_latest_verdicts
+
     rows = await get_latest_verdicts(limit)
-    return {"verdicts": [_parse_verdict(r) for r in rows], "count": len(rows), "timestamp": _now_iso()}
+    return {
+        "verdicts": [_parse_verdict(r) for r in rows],
+        "count": len(rows),
+        "timestamp": _now_iso(),
+    }
 
 
 @app.get("/predict/{symbol}")
-async def predict_symbol(symbol: str, fresh: bool = Query(False)):
+async def predict_symbol(
+    symbol: str, fresh: bool = Query(False), x_admin_token: str | None = Header(default=None)
+):
     """
     Latest calibrated prediction for a symbol. By default returns the most recent STORED
-    prediction (fast); `fresh=true` recomputes live and logs it.
+    prediction (fast); `fresh=true` recomputes live and logs it (admin only: it runs the
+    model on a GET, which crawlers and link previews would otherwise trigger).
     """
     symbol = symbol.upper()
+    if fresh and not is_admin(x_admin_token):
+        raise HTTPException(status_code=403, detail="fresh=true requires the admin token")
     if fresh:
         from .prediction.serve import predict_and_log
+
         p = await predict_and_log(symbol)
         if not p:
             raise HTTPException(status_code=404, detail=f"No prediction available for {symbol}")
         return {"symbol": symbol, "prediction": p, "fresh": True, "timestamp": _now_iso()}
     rows = await get_latest_predictions(symbol, 1)
     if not rows:
-        raise HTTPException(status_code=404,
-                            detail=f"No stored prediction for {symbol}; call with ?fresh=true")
+        raise HTTPException(
+            status_code=404, detail=f"No stored prediction for {symbol}; call with ?fresh=true"
+        )
     return {"symbol": symbol, "prediction": rows[0], "fresh": False, "timestamp": _now_iso()}
+
+
+RANGE_HIT_WINDOW = 60  # most recent matured predictions the range hit rate is measured over
 
 
 @app.get("/predict/{symbol}/history")
@@ -531,8 +602,63 @@ async def predict_symbol_history(symbol: str, limit: int = Query(100, ge=1, le=5
     rows = await get_prediction_history(symbol.upper(), limit)
     resolved = [r for r in rows if r.get("correct") is not None]
     acc = round(sum(r["correct"] for r in resolved) / len(resolved), 4) if resolved else None
-    return {"symbol": symbol.upper(), "history": rows, "count": len(rows),
-            "resolved": len(resolved), "realized_accuracy": acc, "timestamp": _now_iso()}
+    # Live range hit rate: share of matured predictions whose close landed inside the 80% range.
+    banded = [r["in_band"] for r in resolved if r.get("in_band") is not None][:RANGE_HIT_WINDOW]
+    band_hit = round(sum(banded) / len(banded), 4) if banded else None
+    return {
+        "symbol": symbol.upper(),
+        "history": rows,
+        "count": len(rows),
+        "resolved": len(resolved),
+        "realized_accuracy": acc,
+        "band_hit_rate": band_hit,
+        "band_resolved": len(banded),
+        "timestamp": _now_iso(),
+    }
+
+
+_forecast_locks: dict[str, asyncio.Lock] = {}
+
+
+def _forecast_lock(symbol: str) -> asyncio.Lock:
+    return _forecast_locks.setdefault(symbol, asyncio.Lock())
+
+
+@lru_cache(maxsize=1)
+def _point_forecast_quality() -> dict:
+    """Out-of-fold point-forecast record of the shipped return model (model_meta.json)."""
+    try:
+        from .prediction.point_eval import point_forecast_has_skill
+
+        meta = json.loads(
+            (Path(__file__).parent / "prediction" / "models" / "model_meta.json").read_text()
+        )
+        rep = meta.get("conformal_report") or {}
+        mae, naive = rep.get("mae"), rep.get("mae_predict_zero")
+        skill = round(1 - mae / naive, 4) if mae and naive else None
+        return {
+            "mae": mae,
+            "mae_no_change": naive,
+            "skill": skill,
+            "has_skill": point_forecast_has_skill(rep),
+            "coverage": rep.get("coverage", {}),
+        }
+    except Exception as exc:
+        log.warning("point-forecast record unavailable: %s", exc)
+        return {"has_skill": False, "skill": None}
+
+
+@lru_cache(maxsize=1)
+def _model_symbols() -> frozenset[str]:
+    """Symbols the live model was trained on (`fd_orders` in model_meta.json)."""
+    try:
+        meta = json.loads(
+            (Path(__file__).parent / "prediction" / "models" / "model_meta.json").read_text()
+        )
+        return frozenset(meta.get("fd_orders", {}))
+    except Exception as exc:
+        log.warning("model_meta.json unreadable, forecast recompute disabled: %s", exc)
+        return frozenset()
 
 
 @app.get("/predict/{symbol}/forecast")
@@ -544,38 +670,55 @@ async def predict_symbol_forecast(symbol: str, lookback: int = Query(60, ge=10, 
     prediction point are guaranteed consistent. Falls back to a fresh prediction if none stored.
     """
     from .db import get_history
+
     symbol = symbol.upper()
 
-    rows = await get_history(symbol)                       # full series, oldest→newest
+    rows = await get_history(symbol)  # full series, oldest→newest
     if not rows:
         raise HTTPException(status_code=404, detail=f"No price history for {symbol}")
     tail = rows[-lookback:]
-    series = [{"date": r["date"],
-               "close": float(r.get("adj_close") or r.get("close"))}
-              for r in tail if (r.get("adj_close") or r.get("close")) is not None]
+    series = [
+        {"date": r["date"], "close": float(r.get("adj_close") or r.get("close"))}
+        for r in tail
+        if (r.get("adj_close") or r.get("close")) is not None
+    ]
 
     # Reuse today's stored prediction if one exists (one fresh inference per symbol per day);
     # only recompute when stale or missing, so dashboard reloads don't hammer the model.
     stored = await get_latest_predictions(symbol, 1)
     pred = stored[0] if stored else None
     today = datetime.now(timezone.utc).date()
-    is_fresh = pred and pred.get("generated_at") and \
-        datetime.fromtimestamp(pred["generated_at"] / 1000, tz=timezone.utc).date() == today
-    if not is_fresh:
-        try:
-            from .prediction.serve import predict_and_log
-            fresh = await predict_and_log(symbol)
-            if fresh:
-                fresh["generated_at"] = int(time.time() * 1000)
-                pred = fresh
-        except Exception as exc:                           # agent/model offline → fall back to stale/none
-            log.warning("forecast predict failed for %s: %s", symbol, exc)
+    is_fresh = (
+        pred
+        and pred.get("generated_at")
+        and datetime.fromtimestamp(pred["generated_at"] / 1000, tz=timezone.utc).date() == today
+    )
+    # Recompute only for symbols the model was trained on, and only one at a
+    # time per symbol: concurrent dashboard loads share a single inference.
+    lock = _forecast_lock(symbol)
+    if not is_fresh and symbol in _model_symbols() and not lock.locked():
+        async with lock:
+            try:
+                from .prediction.serve import predict_and_log
 
-    return {"symbol": symbol, "series": series, "count": len(series),
-            "prediction": pred, "timestamp": _now_iso()}
+                fresh = await predict_and_log(symbol)
+                if fresh:
+                    fresh["generated_at"] = int(time.time() * 1000)
+                    pred = fresh
+            except Exception as exc:  # agent/model offline → fall back to stale/none
+                log.warning("forecast predict failed for %s: %s", symbol, exc)
+
+    return {
+        "symbol": symbol,
+        "series": series,
+        "count": len(series),
+        "prediction": pred,
+        "point_forecast": _point_forecast_quality(),
+        "timestamp": _now_iso(),
+    }
 
 
-@app.post("/predict/{symbol}/verify")
+@app.post("/predict/{symbol}/verify", dependencies=[Depends(require_user), _AI_LIMIT])
 async def predict_symbol_verify(symbol: str):
     """
     Run the LLM verifier (Layer 3) over the calibrated signal: it explains the call and may
@@ -583,6 +726,7 @@ async def predict_symbol_verify(symbol: str):
     number. Degrades gracefully (verifier='unavailable') if Ollama is down.
     """
     from .prediction.agent import verify_prediction
+
     v = await verify_prediction(symbol.upper())
     if not v:
         raise HTTPException(status_code=404, detail=f"No prediction available for {symbol}")
@@ -613,15 +757,17 @@ def _parse_verdict(row: dict) -> dict:
     }
     m = _VERDICT_RE.search(row.get("content") or "")
     if m:
-        out.update({
-            "direction": m.group("direction"),
-            "model_confidence": int(m.group("model_conf")),
-            "regime": m.group("regime"),
-            "label": m.group("label"),
-            "final_confidence": int(m.group("final_conf")),
-            "rationale": m.group("rationale").strip(),
-            "risks": m.group("risks").strip(),
-        })
+        out.update(
+            {
+                "direction": m.group("direction"),
+                "model_confidence": int(m.group("model_conf")),
+                "regime": m.group("regime"),
+                "label": m.group("label"),
+                "final_confidence": int(m.group("final_conf")),
+                "rationale": m.group("rationale").strip(),
+                "risks": m.group("risks").strip(),
+            }
+        )
     return out
 
 
@@ -632,19 +778,25 @@ async def predict_symbol_verdict(symbol: str):
     parsed into structured fields. `verdict: null` if the verifier hasn't run for this symbol yet.
     """
     from .db import get_latest_verdict
+
     row = await get_latest_verdict(symbol.upper())
-    return {"symbol": symbol.upper(), "verdict": _parse_verdict(row) if row else None, "timestamp": _now_iso()}
+    return {
+        "symbol": symbol.upper(),
+        "verdict": _parse_verdict(row) if row else None,
+        "timestamp": _now_iso(),
+    }
 
 
 @app.get("/ingestion/status")
 async def ingestion_status_endpoint():
     """Scheduler status and per-job last-run metadata."""
     from .ingestion import get_status
+
     jobs = []
     if _scheduler and _scheduler.running:
         jobs = [
             {
-                "id":       j.id,
+                "id": j.id,
                 "next_run": j.next_run_time.isoformat() if j.next_run_time else None,
             }
             for j in _scheduler.get_jobs()
@@ -652,14 +804,14 @@ async def ingestion_status_endpoint():
     log_rows = await get_ingestion_log(20)
     return {
         "scheduler_running": bool(_scheduler and _scheduler.running),
-        "job_status":        get_status(),
-        "scheduled_jobs":    jobs,
-        "recent_log":        log_rows,
-        "timestamp":         _now_iso(),
+        "job_status": get_status(),
+        "scheduled_jobs": jobs,
+        "recent_log": log_rows,
+        "timestamp": _now_iso(),
     }
 
 
-@app.post("/ingestion/trigger/{job}")
+@app.post("/ingestion/trigger/{job}", dependencies=[Depends(require_admin)])
 async def ingestion_trigger(job: str):
     """
     Manually trigger a specific ingestion job immediately.
@@ -670,12 +822,16 @@ async def ingestion_trigger(job: str):
     was the difference between one OOM kill and a restart loop.
     """
     from .ingestion import (
-        ingest_crypto, ingest_stocks, ingest_ohlcv,
-        ingest_news, full_market_cycle,
+        full_market_cycle,
+        ingest_crypto,
+        ingest_news,
+        ingest_ohlcv,
+        ingest_stocks,
     )
 
     async def _predictions():
         from .prediction.flux_x import run_flux_x
+
         try:
             res = await run_flux_x()
             log.info("manual prediction cycle: %s", res)
@@ -683,12 +839,12 @@ async def ingestion_trigger(job: str):
             log.warning("manual prediction cycle failed: %s", exc)
 
     job_map = {
-        "crypto":      ingest_crypto,
-        "stocks":      ingest_stocks,
-        "ohlcv":       ingest_ohlcv,
-        "news":        ingest_news,
-        "market":      full_market_cycle,
-        "insights":    _insight_job,
+        "crypto": ingest_crypto,
+        "stocks": ingest_stocks,
+        "ohlcv": ingest_ohlcv,
+        "news": ingest_news,
+        "market": full_market_cycle,
+        "insights": _insight_job,
         "predictions": _predictions,
     }
     if job not in job_map:
@@ -698,6 +854,7 @@ async def ingestion_trigger(job: str):
 
 
 # ── §B: AI Insights Endpoints ─────────────────────────────────────────────────
+
 
 @app.get("/ai/insights")
 async def ai_insights_list(
@@ -712,7 +869,7 @@ async def ai_insights_list(
     return {"insights": rows, "count": len(rows), "timestamp": _now_iso()}
 
 
-@app.post("/ai/insights/refresh")
+@app.post("/ai/insights/refresh", dependencies=[Depends(require_admin)])
 async def ai_insights_refresh():
     """Trigger an immediate AI insight generation cycle (non-blocking)."""
     all_assets = _cached_assets()
@@ -721,20 +878,21 @@ async def ai_insights_refresh():
 
     asyncio.create_task(_insight_job())
     return {
-        "status":    "refresh_started",
-        "assets":    len(all_assets),
+        "status": "refresh_started",
+        "assets": len(all_assets),
         "timestamp": _now_iso(),
     }
 
 
 # ── §C: RAG Query Endpoint ────────────────────────────────────────────────────
 
+
 class RagQueryRequest(BaseModel):
-    query: str
+    query: str = Field(..., min_length=1, max_length=2000)
     include_context: bool = False
 
 
-@app.post("/ai/rag/query")
+@app.post("/ai/rag/query", dependencies=[Depends(require_user), _AI_LIMIT])
 async def ai_rag_query(body: RagQueryRequest):
     """
     RAG-enhanced financial Q&A.
@@ -751,23 +909,23 @@ async def ai_rag_query(body: RagQueryRequest):
         system_content += f"=== LIVE MARKET CONTEXT (retrieved) ===\n{context}\n=== END ==="
 
     messages = [
-        {"role": "system",  "content": system_content},
-        {"role": "user",    "content": body.query},
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": body.query},
     ]
     try:
         answer = await llm.chat(messages, timeout=45.0)
     except llm.LLMError as exc:
         log.error("RAG chat failed: %s", exc)
-        raise HTTPException(503, str(exc))
+        raise HTTPException(503, str(exc)) from exc
     except Exception as exc:
         log.error("RAG chat failed: %s", exc)
-        raise HTTPException(502, "AI unavailable")
+        raise HTTPException(502, "AI unavailable") from exc
 
     resp: dict = {
-        "answer":       answer,
+        "answer": answer,
         "rag_available": bool(context),
         "context_chunks": n_chunks,
-        "timestamp":    _now_iso(),
+        "timestamp": _now_iso(),
     }
     if body.include_context:
         resp["context"] = context
@@ -788,10 +946,10 @@ async def quotes_crypto():
         assets = await _fetch_crypto_live()
     except httpx.HTTPStatusError as e:
         log.error("CoinGecko HTTP error: %s", e)
-        raise HTTPException(502, f"CoinGecko error: {e.response.status_code}")
+        raise HTTPException(502, f"CoinGecko error: {e.response.status_code}") from e
     except Exception as e:
         log.error("CoinGecko fetch failed: %s", e)
-        raise HTTPException(502, "CoinGecko unreachable")
+        raise HTTPException(502, "CoinGecko unreachable") from e
 
     cache.set("crypto", assets, ttl=settings.CRYPTO_TTL)
     return _wrap(assets, "coingecko_live", cached=False)
@@ -814,7 +972,7 @@ async def quotes_stocks():
         assets = await _fetch_stocks_live()
     except Exception as e:
         log.error("Finnhub fetch failed: %s", e)
-        raise HTTPException(502, "Finnhub unreachable")
+        raise HTTPException(502, "Finnhub unreachable") from e
 
     cache.set("stocks", assets, ttl=settings.STOCKS_TTL)
     return _wrap(assets, "finnhub_live", cached=False)
@@ -822,12 +980,20 @@ async def quotes_stocks():
 
 # ── Portfolio Mark-to-Market Valuation ───────────────────────────────────────
 
+
 # yfinance ticker per holding: NSE equities/ETFs trade as <SYM>.NS in INR;
 # crypto trades as <SYM>-USD and needs the USDINR rate applied.
 def _holding_yf_symbol(h: dict) -> str:
     if h.get("asset_type") == "crypto":
         return f"{h['symbol']}-USD"
+    if h.get("currency") == "USD":  # US-listed, e.g. SPY
+        return h["symbol"]
     return f"{h['symbol']}.NS"
+
+
+def _holding_needs_fx(h: dict) -> bool:
+    """Crypto and US-listed holdings are quoted in USD and converted to INR."""
+    return h.get("asset_type") == "crypto" or h.get("currency") == "USD"
 
 
 def _fetch_last_prices_sync(symbols: list[str]) -> dict[str, float]:
@@ -837,8 +1003,13 @@ def _fetch_last_prices_sync(symbols: list[str]) -> dict[str, float]:
     if not symbols:
         return out
     df = yf.download(
-        symbols, period="5d", interval="1d", auto_adjust=True,
-        progress=False, group_by="ticker", threads=True,
+        symbols,
+        period="5d",
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        group_by="ticker",
+        threads=True,
     )
     for sym in symbols:
         try:
@@ -864,15 +1035,25 @@ async def portfolio_value(user_id: int = Depends(require_user)):
         return {**cached, "cached": True}
 
     from . import mysql_db as M
+
     holdings = M.query("SELECT * FROM portfolio_holdings WHERE user_id=%s", (user_id,))
     if not holdings:
-        return {"holdings": [], "total_value_inr": 0, "total_cost_inr": 0,
-                "pnl_inr": 0, "pnl_pct": 0, "fx_usdinr": None, "priced": 0,
-                "unpriced": [], "cached": False, "timestamp": _now_iso()}
+        return {
+            "holdings": [],
+            "total_value_inr": 0,
+            "total_cost_inr": 0,
+            "pnl_inr": 0,
+            "pnl_pct": 0,
+            "fx_usdinr": None,
+            "priced": 0,
+            "unpriced": [],
+            "cached": False,
+            "timestamp": _now_iso(),
+        }
 
     loop = asyncio.get_event_loop()
     yf_symbols = sorted({_holding_yf_symbol(h) for h in holdings})
-    needs_fx = any(h.get("asset_type") == "crypto" for h in holdings)
+    needs_fx = any(_holding_needs_fx(h) for h in holdings)
     fetch_list = yf_symbols + (["USDINR=X"] if needs_fx else [])
     prices = await loop.run_in_executor(None, _fetch_last_prices_sync, fetch_list)
 
@@ -880,27 +1061,33 @@ async def portfolio_value(user_id: int = Depends(require_user)):
     if needs_fx and not fx:
         # Without FX, pricing crypto in INR would be silently wrong — keep the
         # response honest by leaving those holdings unpriced instead.
-        log.warning("portfolio_value: USDINR rate unavailable; crypto unpriced")
+        log.warning("portfolio_value: USDINR rate unavailable; USD holdings unpriced")
 
     rows, unpriced = [], []
     total_value = total_cost = 0.0
     for h in holdings:
-        qty   = float(h["quantity"])
-        cost  = qty * float(h["avg_price"])          # cost basis stored in INR
+        qty = float(h["quantity"])
+        cost = qty * float(h["avg_price"])  # cost basis stored in INR
         yf_sym = _holding_yf_symbol(h)
-        last   = prices.get(yf_sym)
-        is_crypto = h.get("asset_type") == "crypto"
-        if last is not None and (not is_crypto or fx):
-            value = qty * last * (fx if is_crypto else 1.0)
+        last = prices.get(yf_sym)
+        is_usd = _holding_needs_fx(h)
+        if last is not None and (not is_usd or fx):
+            value = qty * last * (fx if is_usd else 1.0)
             total_value += value
-            total_cost  += cost
-            rows.append({
-                "symbol": h["symbol"], "name": h["name"], "asset_type": h["asset_type"],
-                "quantity": qty, "avg_price": float(h["avg_price"]),
-                "last_price_inr": round(last * (fx if is_crypto else 1.0), 2),
-                "value_inr": round(value, 2), "cost_inr": round(cost, 2),
-                "pnl_pct": round((value - cost) / cost * 100, 2) if cost else 0,
-            })
+            total_cost += cost
+            rows.append(
+                {
+                    "symbol": h["symbol"],
+                    "name": h["name"],
+                    "asset_type": h["asset_type"],
+                    "quantity": qty,
+                    "avg_price": float(h["avg_price"]),
+                    "last_price_inr": round(last * (fx if is_usd else 1.0), 2),
+                    "value_inr": round(value, 2),
+                    "cost_inr": round(cost, 2),
+                    "pnl_pct": round((value - cost) / cost * 100, 2) if cost else 0,
+                }
+            )
         else:
             unpriced.append(h["symbol"])
 
@@ -926,17 +1113,17 @@ async def portfolio_value(user_id: int = Depends(require_user)):
 
 # Maps frontend asset key → yfinance ticker symbol
 _CANDLE_SYMBOL_MAP: dict[str, str] = {
-    "nifty": "^NSEI",
-    "btc":   "BTC-USD",
-    "eth":   "ETH-USD",
+    "btc": "BTC-USD",
+    "eth": "ETH-USD",
+    "spy": "SPY",
 }
 
 # Maps frontend timeframe → (period, interval) for yfinance
 _TF_PARAMS: dict[str, tuple[str, str]] = {
-    "1D": ("1d",  "5m"),
-    "7D": ("7d",  "1h"),
+    "1D": ("1d", "5m"),
+    "7D": ("7d", "1h"),
     "1M": ("1mo", "1d"),
-    "1Y": ("1y",  "1wk"),
+    "1Y": ("1y", "1wk"),
 }
 
 # Candle cache TTLs (seconds)
@@ -956,14 +1143,16 @@ def _fetch_candles_sync(yf_symbol: str, period: str, interval: str) -> list[dict
         return []
     candles = []
     for ts, row in df.iterrows():
-        candles.append({
-            "t": int(ts.timestamp() * 1000),
-            "o": round(float(row["Open"]),  4),
-            "h": round(float(row["High"]),  4),
-            "l": round(float(row["Low"]),   4),
-            "c": round(float(row["Close"]), 4),
-            "v": int(row.get("Volume", 0) or 0),
-        })
+        candles.append(
+            {
+                "t": int(ts.timestamp() * 1000),
+                "o": round(float(row["Open"]), 4),
+                "h": round(float(row["High"]), 4),
+                "l": round(float(row["Low"]), 4),
+                "c": round(float(row["Close"]), 4),
+                "v": int(row.get("Volume", 0) or 0),
+            }
+        )
     return candles
 
 
@@ -975,19 +1164,24 @@ async def market_candles(
     """
     Returns OHLCV candles for a given asset and timeframe.
 
-    asset: nifty | btc | eth
+    asset: btc | eth | spy
     tf:    1D | 7D | 1M | 1Y
     """
     asset_lower = asset.lower()
     yf_symbol = _CANDLE_SYMBOL_MAP.get(asset_lower)
     if yf_symbol is None:
-        raise HTTPException(400, f"Unknown asset '{asset}'. Supported: {list(_CANDLE_SYMBOL_MAP)}")
+        raise HTTPException(404, f"Unknown asset '{asset}'. Supported: {list(_CANDLE_SYMBOL_MAP)}")
 
     cache_key = f"candles:{asset_lower}:{tf}"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"symbol": asset_lower, "tf": tf, "candles": cached,
-                "cached": True, "timestamp": _now_iso()}
+        return {
+            "symbol": asset_lower,
+            "tf": tf,
+            "candles": cached,
+            "cached": True,
+            "timestamp": _now_iso(),
+        }
 
     period, interval = _TF_PARAMS[tf]
     try:
@@ -995,7 +1189,7 @@ async def market_candles(
         candles = await loop.run_in_executor(None, _fetch_candles_sync, yf_symbol, period, interval)
     except Exception as e:
         log.error("yfinance %s %s/%s failed: %s", yf_symbol, period, interval, e)
-        raise HTTPException(502, f"yfinance fetch failed: {e}")
+        raise HTTPException(502, f"yfinance fetch failed: {e}") from e
 
     if not candles:
         raise HTTPException(404, f"No data returned for {asset_lower} / {tf}")
@@ -1003,11 +1197,17 @@ async def market_candles(
     ttl = _CANDLE_TTL.get(tf, 300)
     cache.set(cache_key, candles, ttl=ttl)
     log.info("yfinance %s %s/%s: %d candles", yf_symbol, period, interval, len(candles))
-    return {"symbol": asset_lower, "tf": tf, "candles": candles,
-            "cached": False, "timestamp": _now_iso()}
+    return {
+        "symbol": asset_lower,
+        "tf": tf,
+        "candles": candles,
+        "cached": False,
+        "timestamp": _now_iso(),
+    }
 
 
 # ── Indicators Endpoint ───────────────────────────────────────────────────────
+
 
 def _normalize_to_yf(symbol: str) -> str:
     """Map any frontend ticker string to a yfinance symbol."""
@@ -1015,7 +1215,7 @@ def _normalize_to_yf(symbol: str) -> str:
     # Strip exchange prefixes
     for pfx in ("BINANCE:", "NASDAQ:", "NYSE:", "AMEX:"):
         if s.startswith(pfx):
-            s = s[len(pfx):]
+            s = s[len(pfx) :]
             break
     # Crypto XYZUSDT / XYZUSD → XYZ-USD
     if s.endswith("USDT"):
@@ -1028,7 +1228,7 @@ def _normalize_to_yf(symbol: str) -> str:
 
 def _compute_indicators_sync(yf_symbol: str) -> dict:
     """Blocking: fetch 60 days of daily data and compute Vol, RSI(14), MACD."""
-    import math
+
     ticker = yf.Ticker(yf_symbol)
     df = ticker.history(period="60d", interval="1d", auto_adjust=True)
     if df.empty or len(df) < 27:
@@ -1094,13 +1294,15 @@ async def market_indicators(symbol: str):
         result = await loop.run_in_executor(None, _compute_indicators_sync, yf_symbol)
     except Exception as e:
         log.error("indicators %s failed: %s", yf_symbol, e)
-        raise HTTPException(502, f"yfinance failed: {e}")
+        raise HTTPException(502, f"yfinance failed: {e}") from e
 
     if not result:
         raise HTTPException(404, f"Insufficient data for {yf_symbol}")
 
     cache.set(cache_key, result, ttl=300)
-    log.info("indicators %s: RSI=%.1f MACD=%.4f", yf_symbol, result.get("rsi", 0), result.get("macd", 0))
+    log.info(
+        "indicators %s: RSI=%.1f MACD=%.4f", yf_symbol, result.get("rsi", 0), result.get("macd", 0)
+    )
     return {"symbol": yf_symbol, "indicators": result, "cached": False, "timestamp": _now_iso()}
 
 
@@ -1115,8 +1317,8 @@ _FINANCE_DOMAINS = (
 
 # General market query used for the scrolling headline ticker
 _GENERAL_QUERY = (
-    "bitcoin OR ethereum OR cryptocurrency OR \"stock market\" OR "
-    "\"Federal Reserve\" OR \"interest rate\" OR \"S&P 500\" OR NASDAQ"
+    'bitcoin OR ethereum OR cryptocurrency OR "stock market" OR '
+    '"Federal Reserve" OR "interest rate" OR "S&P 500" OR NASDAQ'
 )
 
 # Maps common asset names/symbols to tighter search terms
@@ -1141,12 +1343,12 @@ _ASSET_QUERY_MAP: dict[str, str] = {
 async def _fetch_news_live(query: str, page_size: int = 15) -> list[dict]:
     """Fetch articles from NewsAPI /v2/everything."""
     params: dict[str, Any] = {
-        "q":        query,
+        "q": query,
         "language": "en",
-        "sortBy":   "publishedAt",
+        "sortBy": "publishedAt",
         "pageSize": page_size,
-        "apiKey":   settings.NEWSAPI_KEY,
-        "domains":  _FINANCE_DOMAINS,
+        "apiKey": settings.NEWSAPI_KEY,
+        "domains": _FINANCE_DOMAINS,
     }
     r = await get_client().get(
         "https://newsapi.org/v2/everything",
@@ -1160,13 +1362,15 @@ async def _fetch_news_live(query: str, page_size: int = 15) -> list[dict]:
         title = (item.get("title") or "").strip()
         if not title or title == "[Removed]":
             continue
-        articles.append({
-            "title":        title,
-            "source":       item.get("source", {}).get("name", ""),
-            "url":          item.get("url", ""),
-            "published_at": item.get("publishedAt", ""),
-            "summary":      (item.get("description") or "")[:200].strip(),
-        })
+        articles.append(
+            {
+                "title": title,
+                "source": item.get("source", {}).get("name", ""),
+                "url": item.get("url", ""),
+                "published_at": item.get("publishedAt", ""),
+                "summary": (item.get("description") or "")[:200].strip(),
+            }
+        )
     log.info("NewsAPI '%s': fetched %d articles", query[:40], len(articles))
     return articles
 
@@ -1190,41 +1394,42 @@ async def market_news(q: str = ""):
 
     cached_data = cache.get(cache_key)
     if cached_data is not None:
-        return {"articles": cached_data, "query": term, "cached": True,
-                "timestamp": _now_iso()}
+        return {"articles": cached_data, "query": term, "cached": True, "timestamp": _now_iso()}
 
     # Resolve the best search query for this term
     if not term:
         search_query = _GENERAL_QUERY
-        page_size    = 20
+        page_size = 20
     else:
         search_query = _ASSET_QUERY_MAP.get(term, q.strip())
-        page_size    = 8
+        page_size = 8
 
     try:
         articles = await _fetch_news_live(search_query, page_size)
     except httpx.HTTPStatusError as e:
         log.error("NewsAPI HTTP error: %s", e)
-        raise HTTPException(502, f"NewsAPI error: {e.response.status_code}")
+        raise HTTPException(502, f"NewsAPI error: {e.response.status_code}") from e
     except Exception as e:
         log.error("NewsAPI fetch failed: %s", e)
-        raise HTTPException(502, "NewsAPI unreachable")
+        raise HTTPException(502, "NewsAPI unreachable") from e
 
     cache.set(cache_key, articles, ttl=settings.NEWS_TTL)
-    return {"articles": articles, "query": term, "cached": False,
-            "timestamp": _now_iso()}
+    return {"articles": articles, "query": term, "cached": False, "timestamp": _now_iso()}
 
 
 # ── AI Chat (Ollama) ──────────────────────────────────────────────────────────
 
+
 class _ChatMsg(BaseModel):
-    role: str
-    content: str
+    role: str = Field(..., max_length=20)
+    content: str = Field(..., max_length=20_000)
+
 
 class ChatRequest(BaseModel):
-    messages: list[_ChatMsg]
+    messages: list[_ChatMsg] = Field(..., min_length=1, max_length=50)
 
-@app.get("/ai/intel/{symbol}")
+
+@app.get("/ai/intel/{symbol}", dependencies=[Depends(require_user), _AI_LIMIT])
 async def ai_intel(symbol: str):
     """
     Returns structured AI analysis for an asset.
@@ -1238,7 +1443,10 @@ async def ai_intel(symbol: str):
         pool = cache.get(cache_key)
         if pool:
             for a in pool:
-                if a.get("sub", "").upper() == sym_upper or a.get("symbol", "").upper() == sym_upper:
+                if (
+                    a.get("sub", "").upper() == sym_upper
+                    or a.get("symbol", "").upper() == sym_upper
+                ):
                     asset_data = a
                     break
         if asset_data:
@@ -1253,7 +1461,7 @@ async def ai_intel(symbol: str):
         context_line = (
             f"{name} ({sym_upper}) is trading at ${price:,.2f}, "
             f"{'+' if change_pct >= 0 else ''}{change_pct:.2f}% in the last 24h "
-            + (f"with a market cap of ${mcap/1e9:.1f}B. " if mcap else ". ")
+            + (f"with a market cap of ${mcap / 1e9:.1f}B. " if mcap else ". ")
             + f"Sentiment direction: {direction}."
         )
     else:
@@ -1273,11 +1481,10 @@ async def ai_intel(symbol: str):
     )
 
     try:
-        raw = llm.strip_fences(
-            await llm.chat([{"role": "user", "content": prompt}], timeout=30.0)
-        )
+        raw = llm.strip_fences(await llm.chat([{"role": "user", "content": prompt}], timeout=30.0))
 
         import json as _json
+
         intel = _json.loads(raw)
         intel.setdefault("symbol", symbol)
         intel.setdefault("name", name)
@@ -1300,7 +1507,7 @@ async def ai_intel(symbol: str):
         }
 
 
-@app.post("/ai/chat/stream")
+@app.post("/ai/chat/stream", dependencies=[Depends(require_user), _AI_LIMIT])
 async def ai_chat_stream(body: ChatRequest):
     """
     Streaming version of /ai/chat — returns Server-Sent Events.
@@ -1308,6 +1515,7 @@ async def ai_chat_stream(body: ChatRequest):
     Final line is: data: [DONE]
     """
     import json as _json
+
     from fastapi.responses import StreamingResponse
 
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
@@ -1336,22 +1544,23 @@ async def ai_chat_stream(body: ChatRequest):
 
 # ── Backtesting (yfinance SMA crossover) ─────────────────────────────────────
 
+
 class BacktestRequest(BaseModel):
-    symbol: str          # e.g. "BTC-USD", "AAPL", "^NSEI"
-    start: str           # "YYYY-MM-DD"
-    end: str             # "YYYY-MM-DD"
-    short_sma: int = 20
-    long_sma: int = 50
-    initial_capital: float = 100000.0
+    symbol: str = Field(..., pattern=r"^[A-Za-z0-9^.\-=]{1,15}$")  # e.g. "BTC-USD", "AAPL", "^GSPC"
+    start: date  # "YYYY-MM-DD"
+    end: date  # "YYYY-MM-DD"
+    short_sma: int = Field(20, ge=2, le=400)
+    long_sma: int = Field(50, ge=2, le=400)
+    initial_capital: float = Field(100000.0, gt=0, le=1e9)
 
 
-def _run_backtest_sync(symbol: str, start: str, end: str,
-                       short_sma: int, long_sma: int,
-                       initial_capital: float) -> dict:
+def _run_backtest_sync(
+    symbol: str, start: str, end: str, short_sma: int, long_sma: int, initial_capital: float
+) -> dict:
     import pandas as pd
 
     # Map friendly tickers
-    _map = {"BTC": "BTC-USD", "ETH": "ETH-USD", "NIFTY": "^NSEI"}
+    _map = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
     yf_sym = _map.get(symbol.upper(), symbol)
 
     df = yf.download(yf_sym, start=start, end=end, auto_adjust=True, progress=False)
@@ -1373,38 +1582,58 @@ def _run_backtest_sync(symbol: str, start: str, end: str,
     df["pos_chg"] = df["signal"].diff()
 
     capital = initial_capital
-    shares  = 0.0
-    trades  = []
+    shares = 0.0
+    trades = []
     equity_curve = []
 
     for ts, row in df.iterrows():
         price = float(row["Close"])
-        if row["pos_chg"] == 1 and capital > 0:          # buy
-            shares  = capital / price
+        if row["pos_chg"] == 1 and capital > 0:  # buy
+            shares = capital / price
             capital = 0.0
-            trades.append({"date": str(ts.date()), "action": "BUY", "price": round(price, 4), "shares": round(shares, 6)})
-        elif row["pos_chg"] == -1 and shares > 0:         # sell
+            trades.append(
+                {
+                    "date": str(ts.date()),
+                    "action": "BUY",
+                    "price": round(price, 4),
+                    "shares": round(shares, 6),
+                }
+            )
+        elif row["pos_chg"] == -1 and shares > 0:  # sell
             capital = shares * price
-            pnl     = capital - initial_capital if not trades else capital - (trades[-1]["price"] * shares)
-            trades.append({"date": str(ts.date()), "action": "SELL", "price": round(price, 4), "shares": round(shares, 6), "pnl": round(pnl, 2)})
-            shares  = 0.0
+            pnl = (
+                capital - initial_capital
+                if not trades
+                else capital - (trades[-1]["price"] * shares)
+            )
+            trades.append(
+                {
+                    "date": str(ts.date()),
+                    "action": "SELL",
+                    "price": round(price, 4),
+                    "shares": round(shares, 6),
+                    "pnl": round(pnl, 2),
+                }
+            )
+            shares = 0.0
 
         total_value = capital + shares * price
         equity_curve.append({"t": int(ts.timestamp() * 1000), "v": round(total_value, 2)})
 
     # Final portfolio value
-    last_price   = float(df["Close"].iloc[-1])
-    final_value  = capital + shares * last_price
+    last_price = float(df["Close"].iloc[-1])
+    final_value = capital + shares * last_price
     total_return = (final_value - initial_capital) / initial_capital * 100
 
     # Daily returns for Sharpe
-    eq_vals  = [p["v"] for p in equity_curve]
+    eq_vals = [p["v"] for p in equity_curve]
     if len(eq_vals) > 1:
-        import math
-        daily_rets = [(eq_vals[i] - eq_vals[i-1]) / eq_vals[i-1] for i in range(1, len(eq_vals))]
-        avg_r  = sum(daily_rets) / len(daily_rets)
-        std_r  = (sum((r - avg_r) ** 2 for r in daily_rets) / len(daily_rets)) ** 0.5
-        sharpe = round((avg_r / std_r * (252 ** 0.5)) if std_r > 0 else 0, 3)
+        daily_rets = [
+            (eq_vals[i] - eq_vals[i - 1]) / eq_vals[i - 1] for i in range(1, len(eq_vals))
+        ]
+        avg_r = sum(daily_rets) / len(daily_rets)
+        std_r = (sum((r - avg_r) ** 2 for r in daily_rets) / len(daily_rets)) ** 0.5
+        sharpe = round((avg_r / std_r * (252**0.5)) if std_r > 0 else 0, 3)
         # Max drawdown
         peak = eq_vals[0]
         max_dd = 0.0
@@ -1419,29 +1648,31 @@ def _run_backtest_sync(symbol: str, start: str, end: str,
         max_dd = 0.0
 
     sell_trades = [t for t in trades if t["action"] == "SELL"]
-    win_rate    = round(sum(1 for t in sell_trades if t.get("pnl", 0) > 0) / max(len(sell_trades), 1) * 100, 1)
+    win_rate = round(
+        sum(1 for t in sell_trades if t.get("pnl", 0) > 0) / max(len(sell_trades), 1) * 100, 1
+    )
 
     return {
-        "symbol":        yf_sym,
-        "start":         start,
-        "end":           end,
-        "short_sma":     short_sma,
-        "long_sma":      long_sma,
+        "symbol": yf_sym,
+        "start": start,
+        "end": end,
+        "short_sma": short_sma,
+        "long_sma": long_sma,
         "initial_capital": initial_capital,
-        "final_value":   round(final_value, 2),
+        "final_value": round(final_value, 2),
         "metrics": {
             "total_return": round(total_return, 2),
-            "sharpe":       sharpe,
+            "sharpe": sharpe,
             "max_drawdown": round(max_dd, 2),
-            "win_rate":     win_rate,
+            "win_rate": win_rate,
             "total_trades": len(trades),
         },
-        "trades":        trades[-20:],   # last 20 to keep payload small
-        "equity_curve":  equity_curve,
+        "trades": trades[-20:],  # last 20 to keep payload small
+        "equity_curve": equity_curve,
     }
 
 
-@app.post("/backtest")
+@app.post("/backtest", dependencies=[Depends(require_user)])
 async def run_backtest(body: BacktestRequest):
     """
     Run an SMA crossover backtest via yfinance.
@@ -1451,22 +1682,31 @@ async def run_backtest(body: BacktestRequest):
     """
     if body.short_sma >= body.long_sma:
         raise HTTPException(400, "short_sma must be less than long_sma")
+    if body.start >= body.end:
+        raise HTTPException(400, "start must be before end")
+    if (body.end - body.start).days > 3653:
+        raise HTTPException(400, "Date range is limited to 10 years")
     try:
-        loop   = asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, _run_backtest_sync,
-            body.symbol, body.start, body.end,
-            body.short_sma, body.long_sma, body.initial_capital,
+            None,
+            _run_backtest_sync,
+            body.symbol,
+            body.start.isoformat(),
+            body.end.isoformat(),
+            body.short_sma,
+            body.long_sma,
+            body.initial_capital,
         )
         return result
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         log.error("Backtest failed: %s", e)
-        raise HTTPException(502, f"Backtest error: {e}")
+        raise HTTPException(502, f"Backtest error: {e}") from e
 
 
-@app.post("/ai/chat")
+@app.post("/ai/chat", dependencies=[Depends(require_user), _AI_LIMIT])
 async def ai_chat(body: ChatRequest):
     """
     Forward a chat request to the configured LLM provider and return the reply.
@@ -1482,7 +1722,7 @@ async def ai_chat(body: ChatRequest):
         return {"content": content}
     except llm.LLMError as e:
         log.error("AI chat failed: %s", e)
-        raise HTTPException(503, str(e))
+        raise HTTPException(503, str(e)) from e
     except Exception as e:
         log.error("AI chat failed: %s", e)
-        raise HTTPException(502, "AI unavailable")
+        raise HTTPException(502, "AI unavailable") from e

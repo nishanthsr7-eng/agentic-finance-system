@@ -3,10 +3,12 @@ FLUX — SQLite persistence layer
 Tables: price_snapshots, ohlcv_daily, ai_insights, news_cache
 """
 
-import aiosqlite
+import asyncio
 import logging
 import os
 from pathlib import Path
+
+import aiosqlite
 
 from .config import settings
 
@@ -26,6 +28,19 @@ def _resolve_db_path() -> Path:
 
 
 DB_PATH = _resolve_db_path()
+
+
+def _mysql_store() -> bool:
+    """MARKET_STORE=mysql keeps predictions, outcomes, calibration and
+    ohlcv_history in TiDB so they survive a restart. Default: SQLite."""
+    return settings.MARKET_STORE.strip().lower() == "mysql"
+
+
+def _ms():
+    from . import market_store_mysql
+
+    return market_store_mysql
+
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -113,6 +128,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     pred_price   REAL,                  -- last_close · (1 + pred_return)
     conf_low     REAL,                  -- conformal band lower price bound
     conf_high    REAL,                  -- conformal band upper price bound
+    conf_low_90  REAL,                  -- 90% band lower price bound
+    conf_high_90 REAL,                  -- 90% band upper price bound
     regime       TEXT,                  -- HMM market state at prediction time
     generated_at INTEGER NOT NULL,
     target_date  TEXT
@@ -125,7 +142,8 @@ CREATE TABLE IF NOT EXISTS prediction_outcomes (
     actual_return REAL,
     correct       INTEGER,
     pnl_after_costs REAL,
-    resolved_at   INTEGER
+    resolved_at   INTEGER,
+    in_band       INTEGER               -- 1 if the close landed inside [conf_low, conf_high]
 );
 
 -- Per-confidence-bucket realized hit-rate (refreshed by the backtest).
@@ -179,10 +197,17 @@ CREATE TABLE IF NOT EXISTS ingestion_log (
 # Columns added after the predictions table first shipped — applied idempotently on init so
 # an existing flux_market.db gains the conformal-band fields without a manual migration.
 _PREDICTION_MIGRATIONS = {
-    "pred_return": "REAL", "pred_price": "REAL",
-    "conf_low": "REAL", "conf_high": "REAL", "regime": "TEXT",
-    "iv_atm": "REAL", "iv_skew": "REAL",        # live options context logged for future feature use
+    "pred_return": "REAL",
+    "pred_price": "REAL",
+    "conf_low": "REAL",
+    "conf_high": "REAL",
+    "regime": "TEXT",
+    "iv_atm": "REAL",
+    "iv_skew": "REAL",  # live options context logged for future feature use
+    "conf_low_90": "REAL",
+    "conf_high_90": "REAL",
 }
+_OUTCOME_MIGRATIONS = {"in_band": "INTEGER"}
 
 
 async def init_db() -> None:
@@ -194,11 +219,17 @@ async def init_db() -> None:
         for col, typ in _PREDICTION_MIGRATIONS.items():
             if col not in existing:
                 await db.execute(f"ALTER TABLE predictions ADD COLUMN {col} {typ}")
+        async with db.execute("PRAGMA table_info(prediction_outcomes)") as cur:
+            existing = {r[1] for r in await cur.fetchall()}
+        for col, typ in _OUTCOME_MIGRATIONS.items():
+            if col not in existing:
+                await db.execute(f"ALTER TABLE prediction_outcomes ADD COLUMN {col} {typ}")
         await db.commit()
     log.info("SQLite initialised at %s", DB_PATH)
 
 
 # ── Writes ────────────────────────────────────────────────────────────────────
+
 
 async def insert_snapshots(rows: list[dict]) -> None:
     if not rows:
@@ -228,6 +259,8 @@ async def upsert_ohlcv(rows: list[dict]) -> None:
 
 async def insert_history(rows: list[dict]) -> None:
     """Upsert long historical OHLCV rows into ohlcv_history (idempotent)."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().insert_history, rows)
     if not rows:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -265,16 +298,19 @@ async def insert_news(rows: list[dict]) -> None:
 
 
 async def insert_prediction(row: dict) -> int:
-    row = {**{k: None for k in _PREDICTION_MIGRATIONS}, **row}   # tolerate missing band fields
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().insert_prediction, row)
+    row = {**{k: None for k in _PREDICTION_MIGRATIONS}, **row}  # tolerate missing band fields
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "INSERT INTO predictions "
             "(symbol, model, horizon_days, direction, prob_up, meta_prob, act, confidence, "
             " kelly_frac, sentiment, last_close, pred_return, pred_price, conf_low, conf_high, "
-            " regime, generated_at, target_date, iv_atm, iv_skew) "
+            " regime, generated_at, target_date, iv_atm, iv_skew, conf_low_90, conf_high_90) "
             "VALUES (:symbol,:model,:horizon_days,:direction,:prob_up,:meta_prob,:act,"
             ":confidence,:kelly_frac,:sentiment,:last_close,:pred_return,:pred_price,"
-            ":conf_low,:conf_high,:regime,:generated_at,:target_date,:iv_atm,:iv_skew)",
+            ":conf_low,:conf_high,:regime,:generated_at,:target_date,:iv_atm,:iv_skew,"
+            ":conf_low_90,:conf_high_90)",
             row,
         )
         await db.commit()
@@ -283,11 +319,14 @@ async def insert_prediction(row: dict) -> int:
 
 async def insert_outcome(row: dict) -> None:
     """Record a resolved prediction's realized outcome (idempotent on prediction_id)."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().insert_outcome, row)
+    row = {"in_band": None, **row}
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT OR REPLACE INTO prediction_outcomes "
-            "(prediction_id, actual_return, correct, pnl_after_costs, resolved_at) "
-            "VALUES (:prediction_id,:actual_return,:correct,:pnl_after_costs,:resolved_at)",
+            "(prediction_id, actual_return, correct, pnl_after_costs, resolved_at, in_band) "
+            "VALUES (:prediction_id,:actual_return,:correct,:pnl_after_costs,:resolved_at,:in_band)",
             row,
         )
         await db.commit()
@@ -295,6 +334,8 @@ async def insert_outcome(row: dict) -> None:
 
 async def get_due_predictions(as_of_date: str) -> list[dict]:
     """Predictions whose target_date has passed and that have no outcome yet."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().get_due_predictions, as_of_date)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -312,6 +353,8 @@ async def get_latest_predictions(symbol: str | None = None, limit: int = 50) -> 
     Most recent prediction per symbol (newest first). With `symbol`, returns that symbol's
     recent predictions; without, one latest row per symbol (leaderboard source).
     """
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().get_latest_predictions, symbol, limit)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if symbol:
@@ -332,10 +375,12 @@ async def get_latest_predictions(symbol: str | None = None, limit: int = 50) -> 
 
 async def get_prediction_history(symbol: str, limit: int = 100) -> list[dict]:
     """A symbol's predictions left-joined with their resolved outcomes (newest first)."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().get_prediction_history, symbol, limit)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT p.*, o.actual_return, o.correct, o.pnl_after_costs, o.resolved_at "
+            "SELECT p.*, o.actual_return, o.correct, o.pnl_after_costs, o.resolved_at, o.in_band "
             "FROM predictions p LEFT JOIN prediction_outcomes o ON p.id=o.prediction_id "
             "WHERE p.symbol=? ORDER BY p.generated_at DESC LIMIT ?",
             (symbol.upper(), limit),
@@ -345,6 +390,8 @@ async def get_prediction_history(symbol: str, limit: int = 100) -> list[dict]:
 
 async def get_resolved_outcomes() -> list[dict]:
     """Resolved predictions with their stated confidence + correctness (live-calibration source)."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().get_resolved_outcomes)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -356,15 +403,20 @@ async def get_resolved_outcomes() -> list[dict]:
 
 async def get_calibration_buckets(model: str = "live") -> list[dict]:
     """Realized hit-rate per confidence bucket (for the reliability strip)."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().get_calibration_buckets, model)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM calibration_buckets WHERE model=? ORDER BY bucket ASC", (model,),
+            "SELECT * FROM calibration_buckets WHERE model=? ORDER BY bucket ASC",
+            (model,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
 
 async def upsert_calibration(rows: list[dict]) -> None:
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().upsert_calibration, rows)
     if not rows:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -398,7 +450,8 @@ async def get_unscored_news(limit: int = 200) -> list[dict]:
         async with db.execute(
             "SELECT n.title, n.url, n.summary, n.published_at FROM news_cache n "
             "LEFT JOIN news_sentiment s ON n.url = s.url "
-            "WHERE s.url IS NULL ORDER BY n.cached_at DESC LIMIT ?", (limit,),
+            "WHERE s.url IS NULL ORDER BY n.cached_at DESC LIMIT ?",
+            (limit,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -406,12 +459,14 @@ async def get_unscored_news(limit: int = 200) -> list[dict]:
 async def get_symbol_sentiment(symbol: str, days: int = 7) -> list[dict]:
     """Recent sentiment rows for a symbol (and general-market rows)."""
     import time
+
     cutoff = int((time.time() - days * 86400) * 1000)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM news_sentiment WHERE (symbol=? OR symbol='') AND scored_at>=? "
-            "ORDER BY scored_at DESC", (symbol.upper(), cutoff),
+            "ORDER BY scored_at DESC",
+            (symbol.upper(), cutoff),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -444,6 +499,7 @@ async def get_latest_options_iv(symbol: str) -> dict | None:
 
 async def log_ingestion(job: str, status: str, rows: int = 0, message: str = "") -> None:
     import time
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO ingestion_log (job, status, rows, message, ts) VALUES (?,?,?,?,?)",
@@ -453,6 +509,7 @@ async def log_ingestion(job: str, status: str, rows: int = 0, message: str = "")
 
 
 # ── Reads ─────────────────────────────────────────────────────────────────────
+
 
 async def get_latest_snapshots(limit: int = 50) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -489,11 +546,12 @@ async def get_history(symbol: str, start: str | None = None) -> list[dict]:
     Return the full historical OHLCV series for a symbol, oldest→newest.
     Pass start='YYYY-MM-DD' to limit to rows on/after that date.
     """
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().get_history, symbol, start)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if start:
-            sql = ("SELECT * FROM ohlcv_history WHERE symbol=? AND date>=? "
-                   "ORDER BY date ASC")
+            sql = "SELECT * FROM ohlcv_history WHERE symbol=? AND date>=? ORDER BY date ASC"
             params: tuple = (symbol.upper(), start)
         else:
             sql = "SELECT * FROM ohlcv_history WHERE symbol=? ORDER BY date ASC"
@@ -504,6 +562,8 @@ async def get_history(symbol: str, start: str | None = None) -> list[dict]:
 
 async def history_summary() -> list[dict]:
     """Per-symbol row count + date range — used to verify a backfill."""
+    if _mysql_store():
+        return await asyncio.to_thread(_ms().history_summary)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -577,10 +637,22 @@ async def get_ingestion_log(limit: int = 20) -> list[dict]:
 async def prune_old_snapshots(keep_days: int = 7) -> int:
     """Delete price snapshots older than keep_days to bound DB size."""
     import time
+
     cutoff = int((time.time() - keep_days * 86400) * 1000)
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute(
-            "DELETE FROM price_snapshots WHERE ts < ?", (cutoff,)
-        )
+        cur = await db.execute("DELETE FROM price_snapshots WHERE ts < ?", (cutoff,))
+        await db.commit()
+        return cur.rowcount
+
+
+async def prune_ingestion_log(keep_days: int = 30) -> int:
+    """Delete ingestion_log rows older than keep_days (0 keeps everything)."""
+    if keep_days <= 0:
+        return 0
+    import time
+
+    cutoff = int((time.time() - keep_days * 86400) * 1000)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("DELETE FROM ingestion_log WHERE ts < ?", (cutoff,))
         await db.commit()
         return cur.rowcount

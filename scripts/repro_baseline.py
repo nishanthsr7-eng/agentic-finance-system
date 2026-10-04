@@ -7,6 +7,7 @@ must beat. FRED activation is Phase 1, deliberately excluded here.
 
     python scripts/repro_baseline.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,9 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Force the Phase-0 (price-only) baseline regardless of whether FRED_API_KEY is in .env.
 from backend.config import settings
+
 settings.FRED_API_KEY = ""
 
-from backend.prediction import train, backtest  # noqa: E402
+from backend.prediction import backtest, train  # noqa: E402
 
 
 async def _main():

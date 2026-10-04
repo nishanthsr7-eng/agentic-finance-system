@@ -30,8 +30,8 @@ log = logging.getLogger("flux.prediction.garch")
 
 # arch wants returns on a ~percent scale for numerical conditioning; we scale in/out by this.
 _SCALE = 100.0
-_EWMA_SPAN = 20            # fallback σ span (≈ RiskMetrics λ=0.94 → span ~32; 20 is a touch faster)
-_MIN_OBS = 250            # below this a GARCH fit is unreliable → use EWMA
+_EWMA_SPAN = 20  # fallback σ span (≈ RiskMetrics λ=0.94 → span ~32; 20 is a touch faster)
+_MIN_OBS = 250  # below this a GARCH fit is unreliable → use EWMA
 
 
 def _to_returns(series: pd.Series) -> pd.Series:
@@ -58,6 +58,7 @@ def conditional_vol(series: pd.Series) -> pd.Series:
         return _ewma_vol(ret)
     try:
         from arch import arch_model
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             am = arch_model(ret.values * _SCALE, mean="Zero", vol="Garch", p=1, q=1, dist="normal")
@@ -67,7 +68,7 @@ def conditional_vol(series: pd.Series) -> pd.Series:
         if not np.isfinite(cv.values).all() or cv.std() == 0:
             return _ewma_vol(ret)
         return cv
-    except Exception as exc:                                   # arch missing or fit blew up
+    except Exception as exc:  # arch missing or fit blew up
         log.debug("GARCH conditional_vol fallback to EWMA: %s", exc)
         return _ewma_vol(ret)
 
@@ -83,13 +84,16 @@ def forecast_h_vol(series: pd.Series, horizon: int) -> float:
     if len(ret) >= _MIN_OBS:
         try:
             from arch import arch_model
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                am = arch_model(ret.values * _SCALE, mean="Zero", vol="Garch", p=1, q=1, dist="normal")
+                am = arch_model(
+                    ret.values * _SCALE, mean="Zero", vol="Garch", p=1, q=1, dist="normal"
+                )
                 res = am.fit(disp="off", show_warning=False)
                 fc = res.forecast(horizon=horizon, reindex=False)
             # Var of the h-day sum ≈ Σ daily forecast variances (innovations ~uncorrelated).
-            var_h = float(np.nansum(fc.variance.values[-1])) / (_SCALE ** 2)
+            var_h = float(np.nansum(fc.variance.values[-1])) / (_SCALE**2)
             if np.isfinite(var_h) and var_h > 0:
                 return float(np.sqrt(var_h))
         except Exception as exc:
@@ -109,6 +113,8 @@ if __name__ == "__main__":
     vol = np.concatenate([np.full(400, 0.01), np.full(200, 0.04), np.full(400, 0.01)])
     rets = pd.Series(rng.normal(0, vol), index=pd.date_range("2015-01-01", periods=1000, freq="B"))
     cv = conditional_vol(rets)
-    print(f"GARCH sigma -- calm head {cv.iloc[100:300].mean():.4f}  "
-          f"vs stressed mid {cv.iloc[450:550].mean():.4f}  (mid should be larger)")
+    print(
+        f"GARCH sigma -- calm head {cv.iloc[100:300].mean():.4f}  "
+        f"vs stressed mid {cv.iloc[450:550].mean():.4f}  (mid should be larger)"
+    )
     print(f"5-day-ahead sigma forecast: {forecast_h_vol(rets, 5):.4f}")

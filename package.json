@@ -1,7 +1,7 @@
 {
   "name": "flux-agentic-finance-system",
   "version": "1.0.0",
-  "description": "AI-powered finance platform: a FastAPI + XGBoost prediction agent with purged walk-forward CV and conformal uncertainty bands, behind a full digital-wallet frontend.",
+  "description": "Agentic AI Finance & Stock Prediction System: a FastAPI + XGBoost prediction agent with purged walk-forward CV and conformal uncertainty bands, behind a paper-trading wallet frontend.",
   "keywords": [
     "fintech",
     "machine-learning",
@@ -14,13 +14,13 @@
     "rag",
     "paper-trading"
   ],
-  "homepage": "https://github.com/nishanthsr7-eng/FLUX-Agentic_Finance_System#readme",
+  "homepage": "https://github.com/nishanthsr7-eng/agentic-finance-system#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nishanthsr7-eng/FLUX-Agentic_Finance_System.git"
+    "url": "https://github.com/nishanthsr7-eng/agentic-finance-system.git"
   },
   "bugs": {
-    "url": "https://github.com/nishanthsr7-eng/FLUX-Agentic_Finance_System/issues"
+    "url": "https://github.com/nishanthsr7-eng/agentic-finance-system/issues"
   },
   "author": "Nishanth S <nishanth.sr.7@gmail.com>",
   "license": "MIT",

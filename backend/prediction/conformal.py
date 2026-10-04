@@ -67,14 +67,15 @@ class ConformalBands:
     Calibrated conformal half-widths in σ-units, keyed by miscoverage alpha. `interval()` turns
     a point estimate + a (GARCH) scale into a concrete [low, high] return band.
     """
+
     horizon: int
-    q: dict[float, float] = field(default_factory=dict)            # alpha -> half-width (σ units)
-    coverage: dict[float, float] = field(default_factory=dict)     # alpha -> OOF realised coverage
+    q: dict[float, float] = field(default_factory=dict)  # alpha -> half-width (σ units)
+    coverage: dict[float, float] = field(default_factory=dict)  # alpha -> OOF realised coverage
     n_calib: int = 0
-    scale_floor: float = 1e-6                                       # avoid div-by-zero on flat σ
+    scale_floor: float = 1e-6  # avoid div-by-zero on flat σ
 
     @classmethod
-    def fit(cls, residuals, scales, horizon: int, alphas=(0.2, 0.1)) -> "ConformalBands":
+    def fit(cls, residuals, scales, horizon: int, alphas=(0.2, 0.1)) -> ConformalBands:
         """
         Calibrate from out-of-fold residuals and matching per-event GARCH scales.
             residuals : y_true - y_pred  (h-day return units)
@@ -85,7 +86,7 @@ class ConformalBands:
         s = np.asarray(scales, dtype=float)
         m = np.isfinite(r) & np.isfinite(s) & (s > 0)
         r, s = r[m], s[m]
-        u = np.abs(r) / np.maximum(s, 1e-12)                       # normalised nonconformity
+        u = np.abs(r) / np.maximum(s, 1e-12)  # normalised nonconformity
         self = cls(horizon=int(horizon), n_calib=int(u.size))
         for a in alphas:
             qa = conformal_quantile(u, a)
@@ -96,7 +97,7 @@ class ConformalBands:
     def interval(self, point: float, scale: float, alpha: float = 0.2) -> tuple[float, float]:
         """Return (low, high) for a point estimate and a per-event σ scale, at miscoverage alpha."""
         q = self.q.get(float(alpha))
-        if q is None:                                              # nearest calibrated alpha
+        if q is None:  # nearest calibrated alpha
             q = self.q[min(self.q, key=lambda a: abs(a - alpha))]
         half = q * max(float(scale), self.scale_floor)
         return float(point - half), float(point + half)
@@ -104,27 +105,44 @@ class ConformalBands:
     # ── persistence (plain dict via joblib, like the other artifacts) ─────────────
     def save(self, path: str | Path) -> None:
         import joblib
-        joblib.dump({"horizon": self.horizon, "q": self.q, "coverage": self.coverage,
-                     "n_calib": self.n_calib, "scale_floor": self.scale_floor}, path)
+
+        joblib.dump(
+            {
+                "horizon": self.horizon,
+                "q": self.q,
+                "coverage": self.coverage,
+                "n_calib": self.n_calib,
+                "scale_floor": self.scale_floor,
+            },
+            path,
+        )
 
     @classmethod
-    def load(cls, path: str | Path) -> "ConformalBands":
+    def load(cls, path: str | Path) -> ConformalBands:
         import joblib
+
         d = joblib.load(path)
-        return cls(horizon=d["horizon"], q=d["q"], coverage=d["coverage"],
-                   n_calib=d.get("n_calib", 0), scale_floor=d.get("scale_floor", 1e-6))
+        return cls(
+            horizon=d["horizon"],
+            q=d["q"],
+            coverage=d["coverage"],
+            n_calib=d.get("n_calib", 0),
+            scale_floor=d.get("scale_floor", 1e-6),
+        )
 
 
 if __name__ == "__main__":
     # Sanity: with correctly-specified scale, an 80% band should cover ~80% on held-out draws.
     rng = np.random.default_rng(1)
     n = 5000
-    scale = rng.uniform(0.01, 0.05, n)                # heteroskedastic "GARCH" σ
-    resid = rng.normal(0, scale)                      # residuals genuinely scale with σ
+    scale = rng.uniform(0.01, 0.05, n)  # heteroskedastic "GARCH" σ
+    resid = rng.normal(0, scale)  # residuals genuinely scale with σ
     cut = n // 2
     bands = ConformalBands.fit(resid[:cut], scale[:cut], horizon=5, alphas=(0.2, 0.1))
     for a in (0.2, 0.1):
         q = bands.q[a]
         cov = empirical_coverage(np.abs(resid[cut:]) / scale[cut:], q)
-        print(f"  target {1-a:.0%} band: half-width {q:.2f}sigma  "
-              f"calib-cov {bands.coverage[a]:.1%}  holdout-cov {cov:.1%}")
+        print(
+            f"  target {1 - a:.0%} band: half-width {q:.2f}sigma  "
+            f"calib-cov {bands.coverage[a]:.1%}  holdout-cov {cov:.1%}"
+        )

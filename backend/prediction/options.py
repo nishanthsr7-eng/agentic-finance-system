@@ -34,11 +34,14 @@ import pandas as pd
 
 log = logging.getLogger("flux.prediction.options")
 
-_NEAR_DAYS = 30           # target tenor for the ATM/skew read (1-month standard)
-_FAR_DAYS = 90            # target tenor for the far leg of the term-structure slope
-_PUT_MONEY = 0.90         # OTM put strike ≈ 0.90·spot  (skew proxy — not a true 25Δ)
-_CALL_MONEY = 1.10        # OTM call strike ≈ 1.10·spot
-_IV_LO, _IV_HI = 0.01, 5.0  # drop junk/stale IVs outside this band (yfinance returns ~1e-5 for dead strikes)
+_NEAR_DAYS = 30  # target tenor for the ATM/skew read (1-month standard)
+_FAR_DAYS = 90  # target tenor for the far leg of the term-structure slope
+_PUT_MONEY = 0.90  # OTM put strike ≈ 0.90·spot  (skew proxy — not a true 25Δ)
+_CALL_MONEY = 1.10  # OTM call strike ≈ 1.10·spot
+_IV_LO, _IV_HI = (
+    0.01,
+    5.0,
+)  # drop junk/stale IVs outside this band (yfinance returns ~1e-5 for dead strikes)
 
 
 def _clean_iv(df: pd.DataFrame) -> pd.DataFrame:
@@ -149,6 +152,7 @@ def _is_optionable(symbol: str) -> bool:
     ingestion.STOCK_META — crypto/index symbols are not in it and correctly return None."""
     try:
         from ..ingestion import STOCK_META
+
         return symbol.upper() in STOCK_META
     except Exception:
         return False
@@ -189,24 +193,31 @@ async def symbol_iv(symbol: str) -> dict:
     if not row:
         return {"atm_iv": None, "skew": None, "term_slope": None, "as_of": None, "available": False}
     return {
-        "atm_iv": row["atm_iv"], "skew": row["skew"], "term_slope": row["term_slope"],
-        "as_of": row["date"], "available": True,
+        "atm_iv": row["atm_iv"],
+        "skew": row["skew"],
+        "term_slope": row["term_slope"],
+        "as_of": row["date"],
+        "available": True,
     }
 
 
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
         from backend.db import init_db
+
         await init_db()
-        for sym in ("AAPL", "NVDA", "TSLA", "BTC"):           # BTC is crypto -> None (graceful)
+        for sym in ("AAPL", "NVDA", "TSLA", "BTC"):  # BTC is crypto -> None (graceful)
             f = await compute_iv_features(sym)
             if f:
-                print(f"  {sym:5} ATM IV {f['atm_iv']}  skew {f['skew']}  term {f['term_slope']}  "
-                      f"(spot {f['spot']}, n={f['n_contracts']}, {f['date']})")
+                print(
+                    f"  {sym:5} ATM IV {f['atm_iv']}  skew {f['skew']}  term {f['term_slope']}  "
+                    f"(spot {f['spot']}, n={f['n_contracts']}, {f['date']})"
+                )
             else:
                 print(f"  {sym:5} no usable option chain (crypto/illiquid) -> skipped")
 

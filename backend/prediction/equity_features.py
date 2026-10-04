@@ -61,7 +61,7 @@ Public API:
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
+from functools import cache, lru_cache
 
 import numpy as np
 import pandas as pd
@@ -71,24 +71,24 @@ from .datasources.sec_fundamentals import load_sec_fundamentals
 log = logging.getLogger("flux.prediction.equity_features")
 
 EQUITY_FEATURE_COLS = [
-    "earnings_surprise",   # SUE: standardised YoY EPS surprise (step, held until next filing)
-    "earnings_drift",      # PEAD: sign(SUE) decayed over the quarter after the filing (daily)
-    "rev_revision",        # YoY single-quarter revenue growth (step)
-    "valuation_z",         # trailing z-score of TTM earnings yield (daily, uses price)
-    "accruals",            # Δ(net operating assets)/avg-assets — earnings quality (step)
+    "earnings_surprise",  # SUE: standardised YoY EPS surprise (step, held until next filing)
+    "earnings_drift",  # PEAD: sign(SUE) decayed over the quarter after the filing (daily)
+    "rev_revision",  # YoY single-quarter revenue growth (step)
+    "valuation_z",  # trailing z-score of TTM earnings yield (daily, uses price)
+    "accruals",  # Δ(net operating assets)/avg-assets — earnings quality (step)
 ]
 
 # Cumulative income-statement metrics (need within-fiscal-year differencing to a single quarter).
 _CUM_METRICS = ["revenue", "net_income", "op_income", "eps_diluted"]
 
 # Tunables (kept conservative; clipping stops one bad filing from owning a tree split).
-_CLIP = 1.0          # ratio/growth features clamped to ±100%
-_CLIP_Z = 4.0        # z-scores clamped to ±4σ
-_SUE_WIN = 8         # filings (~2y) for the surprise-volatility scale
+_CLIP = 1.0  # ratio/growth features clamped to ±100%
+_CLIP_Z = 4.0  # z-scores clamped to ±4σ
+_SUE_WIN = 8  # filings (~2y) for the surprise-volatility scale
 _SUE_MIN = 4
-_DRIFT_TAU = 30.0    # PEAD decay constant (calendar days)
-_DRIFT_MAX = 90      # drift fully off ~one quarter after the filing
-_VAL_WIN = 252       # trading days for the earnings-yield z-score
+_DRIFT_TAU = 30.0  # PEAD decay constant (calendar days)
+_DRIFT_MAX = 90  # drift fully off ~one quarter after the filing
+_VAL_WIN = 252  # trading days for the earnings-yield z-score
 _VAL_MIN = 60
 
 
@@ -131,7 +131,7 @@ def _ttm(values: np.ndarray, periods: pd.Series, min_n: int) -> np.ndarray:
     return out
 
 
-@lru_cache(maxsize=None)
+@cache
 def _symbol_quarterly(symbol: str) -> pd.DataFrame | None:
     """Filing-level fundamentals features for one symbol (None if not in the SEC universe).
 
@@ -192,7 +192,11 @@ def _quarterly_features(d: pd.DataFrame) -> pd.DataFrame:
     # ttm_eps for the valuation yield (trailing full year of single-quarter EPS).
     d["ttm_eps"] = _ttm(eps_q.values.astype(float), d["period"], min_n=4 if is_quarterly else 1)
 
-    return d[["date", "sue", "rev_revision", "accruals", "ttm_eps"]].sort_values("date").reset_index(drop=True)
+    return (
+        d[["date", "sue", "rev_revision", "accruals", "ttm_eps"]]
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
 
 # ── Assembly ─────────────────────────────────────────────────────────────────────
@@ -214,7 +218,7 @@ def compute_equity_features(symbol: str, price: pd.DataFrame) -> pd.DataFrame:
     idx = pd.DatetimeIndex(pd.to_datetime(price.index))
 
     if symbol.upper() not in _equity_symbols():
-        return out                                            # non-equity -> all neutral
+        return out  # non-equity -> all neutral
 
     qf = _symbol_quarterly(symbol)
     if qf is None or qf.empty:
@@ -235,11 +239,18 @@ def compute_equity_features(symbol: str, price: pd.DataFrame) -> pd.DataFrame:
     # earnings_drift (PEAD): sign of the most recent surprise, decayed over the ~quarter after filing.
     sue_step = _step("sue").values
     last_filed = pd.Series(fdate.values, index=fdate)
-    last_filed = last_filed[~last_filed.index.duplicated(keep="last")].sort_index().reindex(idx, method="ffill")
+    last_filed = (
+        last_filed[~last_filed.index.duplicated(keep="last")]
+        .sort_index()
+        .reindex(idx, method="ffill")
+    )
     days = (idx.values - last_filed.values).astype("timedelta64[D]").astype(float)
-    decay = np.where(np.isfinite(days) & (days >= 0) & (days <= _DRIFT_MAX),
-                     np.exp(-np.clip(days, 0, None) / _DRIFT_TAU), 0.0)
-    out["earnings_drift"] = (np.sign(np.nan_to_num(sue_step)) * decay)
+    decay = np.where(
+        np.isfinite(days) & (days >= 0) & (days <= _DRIFT_MAX),
+        np.exp(-np.clip(days, 0, None) / _DRIFT_TAU),
+        0.0,
+    )
+    out["earnings_drift"] = np.sign(np.nan_to_num(sue_step)) * decay
 
     # valuation_z: causal trailing z-score of the TTM earnings yield (uses the symbol's own price).
     ttm_eps = _step("ttm_eps").values
@@ -248,7 +259,9 @@ def compute_equity_features(symbol: str, price: pd.DataFrame) -> pd.DataFrame:
         ey = pd.Series(ttm_eps / np.where(close > 0, close, np.nan), index=idx)
     mu = ey.rolling(_VAL_WIN, min_periods=_VAL_MIN).mean()
     sd = ey.rolling(_VAL_WIN, min_periods=_VAL_MIN).std()
-    out["valuation_z"] = ((ey - mu) / sd.replace(0, np.nan)).clip(-_CLIP_Z, _CLIP_Z).fillna(0.0).values
+    out["valuation_z"] = (
+        ((ey - mu) / sd.replace(0, np.nan)).clip(-_CLIP_Z, _CLIP_Z).fillna(0.0).values
+    )
 
     return out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
@@ -257,17 +270,20 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
-        from backend.db import init_db, get_history
+        from backend.db import get_history, init_db
         from backend.prediction.features import build_features_from_df, calibrate_fd_order
+
         await init_db()
 
         for sym in ("AAPL", "NVDA", "JPM", "TSM", "BTC"):
             rows = await get_history(sym)
             if not rows:
-                print(f"  {sym:5} no history"); continue
+                print(f"  {sym:5} no history")
+                continue
             df = pd.DataFrame(rows)
             d = calibrate_fd_order(pd.Series(df["adj_close"].astype(float).values[: len(df) // 2]))
             feat = build_features_from_df(df, fd_order=d)
@@ -276,10 +292,14 @@ if __name__ == "__main__":
             assert np.isfinite(ef.values).all(), "non-finite equity feature"
             nz = [c for c in EQUITY_FEATURE_COLS if (ef[c].abs() > 1e-9).any()]
             t = ef.iloc[-1]
-            print(f"  {sym:5} active={len(nz)}/{len(EQUITY_FEATURE_COLS)}  "
-                  f"sue={t['earnings_surprise']:+.2f} drift={t['earnings_drift']:+.2f} "
-                  f"rev_rev={t['rev_revision']:+.3f} val_z={t['valuation_z']:+.2f} "
-                  f"accr={t['accruals']:+.3f}")
-        print("OK — crypto returns an all-zero (neutral) block; equity rows are populated & finite.")
+            print(
+                f"  {sym:5} active={len(nz)}/{len(EQUITY_FEATURE_COLS)}  "
+                f"sue={t['earnings_surprise']:+.2f} drift={t['earnings_drift']:+.2f} "
+                f"rev_rev={t['rev_revision']:+.3f} val_z={t['valuation_z']:+.2f} "
+                f"accr={t['accruals']:+.3f}"
+            )
+        print(
+            "OK — crypto returns an all-zero (neutral) block; equity rows are populated & finite."
+        )
 
     asyncio.run(_demo())

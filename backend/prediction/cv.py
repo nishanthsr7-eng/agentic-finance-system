@@ -55,7 +55,6 @@ class PurgedWalkForwardSplit:
             if len(test_pos) == 0:
                 continue
 
-            test_start_date = times[test_start]
             emb_pos = max(0, test_start - self.embargo)
             emb_date = times[emb_pos]
 

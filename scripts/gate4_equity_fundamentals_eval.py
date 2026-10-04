@@ -19,6 +19,7 @@ exactly as crypto-features and FRED were handled.
 
     python scripts/gate4_equity_fundamentals_eval.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np  # noqa: E402
 from sklearn.metrics import roc_auc_score  # noqa: E402
 
-MARGIN = 1e-3   # an AUC delta within ±MARGIN is a "tie" (no structural lift)
+MARGIN = 1e-3  # an AUC delta within ±MARGIN is a "tie" (no structural lift)
 
 
 def _auc_on(y, p, mask):
@@ -49,17 +50,20 @@ def _auc_pair(y, base, aug, mask):
     yt = y[common]
     if yt.size == 0 or yt.min() == yt.max():
         return float("nan"), float("nan"), int(common.sum())
-    return (float(roc_auc_score(yt, base[common])),
-            float(roc_auc_score(yt, aug[common])), int(common.sum()))
+    return (
+        float(roc_auc_score(yt, base[common])),
+        float(roc_auc_score(yt, aug[common])),
+        int(common.sum()),
+    )
 
 
 async def _main():
-    os.environ["FLUX_EQUITY_FEATURES"] = "1"     # join the equity block into the panel
+    os.environ["FLUX_EQUITY_FEATURES"] = "1"  # join the equity block into the panel
     os.environ.setdefault("FLUX_CRYPTO_FEATURES", "0")
 
-    from backend.prediction.train import load_dataset, evaluate_oof
-    from backend.prediction.equity_features import EQUITY_FEATURE_COLS
     from backend.prediction.datasources import CRYPTO_SYMBOLS
+    from backend.prediction.equity_features import EQUITY_FEATURE_COLS
+    from backend.prediction.train import evaluate_oof, load_dataset
 
     X, y, w, t1, feat_cols, _fd, data = await load_dataset()
     base_cols = [c for c in feat_cols if c not in EQUITY_FEATURE_COLS]
@@ -69,8 +73,10 @@ async def _main():
     crypto = data["_sym"].isin(CRYPTO_SYMBOLS).values
     equity = ~crypto
     classes = {"equity": equity, "crypto": crypto, "pooled": np.ones(len(y), bool)}
-    print(f"Panel: {len(X):,} events ({equity.sum():,} equity / {crypto.sum():,} crypto) | "
-          f"base {len(base_cols)} + equity {len(eq_cols)} feats {eq_cols}\n")
+    print(
+        f"Panel: {len(X):,} events ({equity.sum():,} equity / {crypto.sum():,} crypto) | "
+        f"base {len(base_cols)} + equity {len(eq_cols)} feats {eq_cols}\n"
+    )
 
     base = evaluate_oof(X, y, w, t1, base_cols)["_oof_p_full"]
     aug = evaluate_oof(X, y, w, t1, feat_cols)["_oof_p_full"]
@@ -95,11 +101,15 @@ async def _main():
         verdict = "TIE within noise — no structural lift; keep self-gated OFF (honesty contract)"
     else:
         verdict = "FAIL — equity AUC declines; keep self-gated OFF"
-    print(f"  GATE-4 (equity >= Phase-3 equity): {'>=' if not_worse else '<'} baseline "
-          f"(delta {eq_delta:+.4f}) -> {verdict}")
+    print(
+        f"  GATE-4 (equity >= Phase-3 equity): {'>=' if not_worse else '<'} baseline "
+        f"(delta {eq_delta:+.4f}) -> {verdict}"
+    )
     # Guard: the neutral block must not move the crypto subset.
     if abs(deltas["crypto"]) > 5e-3:
-        print(f"  WARNING: crypto AUC moved by {deltas['crypto']:+.4f} — the block should be neutral there.")
+        print(
+            f"  WARNING: crypto AUC moved by {deltas['crypto']:+.4f} — the block should be neutral there."
+        )
 
 
 if __name__ == "__main__":

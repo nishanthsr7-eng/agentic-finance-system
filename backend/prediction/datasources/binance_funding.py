@@ -54,7 +54,9 @@ if __name__ == "__main__":
     assert list(df.columns) == ["symbol", "date", "funding", "funding_last"]
     assert df.duplicated(["symbol", "date"]).sum() == 0, "duplicate (symbol,date) rows"
     n = df.groupby("symbol").size()
-    print(f"funding: {len(df):,} rows over {df.symbol.nunique()} symbols "
-          f"({df.date.min().date()}..{df.date.max().date()})")
+    print(
+        f"funding: {len(df):,} rows over {df.symbol.nunique()} symbols "
+        f"({df.date.min().date()}..{df.date.max().date()})"
+    )
     print(df[df.symbol == "BTC"].tail(3).to_string(index=False))
     print(f"rows/symbol: {n.min()}..{n.max()}  | OK")

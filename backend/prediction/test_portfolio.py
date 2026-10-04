@@ -23,8 +23,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from backend.prediction.portfolio import (neutralize_returns, leg_weights,        # noqa: E402
-                                          vol_target_stream, sector_of)
+from backend.prediction.portfolio import (
+    leg_weights,  # noqa: E402
+    neutralize_returns,
+    sector_of,
+    vol_target_stream,
+)
 
 
 def _cs(ret, beta, sector):
@@ -34,7 +38,7 @@ def _cs(ret, beta, sector):
 # ── 1. Market-neutralization removes a constant common move ───────────────────
 def test_market_neutral_removes_common_move() -> None:
     base = np.array([0.03, -0.01, 0.00, 0.02, -0.04])
-    drift = 0.05                                            # everything rises 5% (bull tape)
+    drift = 0.05  # everything rises 5% (bull tape)
     cs = _cs(base + drift, beta=np.ones(5), sector=["Crypto"] * 5)
     resid = neutralize_returns(cs, "market")
     # The common move is gone (mean ~0) and the cross-sectional SPREAD is preserved exactly.
@@ -48,7 +52,7 @@ def test_beta_neutral_strips_beta_exposure() -> None:
     # Construct returns that are PURELY market beta × a common factor (+ alpha). Beta-neutralizing
     # must leave only the alpha (idiosyncratic) part — this is what unlocks the short leg.
     beta = np.array([0.2, 0.5, 1.0, 1.5, 2.0, 0.8])
-    factor = 0.04                                          # the market moved +4% this period
+    factor = 0.04  # the market moved +4% this period
     alpha = np.array([0.01, -0.02, 0.00, 0.015, -0.01, 0.005])
     ret = beta * factor + alpha
     cs = _cs(ret, beta=beta, sector=["Crypto"] * 6)
@@ -60,7 +64,9 @@ def test_beta_neutral_strips_beta_exposure() -> None:
     assert abs(resid.mean()) < 1e-9, "beta-neutral residual should be mean-zero"
     assert abs(np.corrcoef(resid, beta)[0, 1]) < 1e-6, "residual still loaded on beta"
     assert resid.var() < ret.var(), "beta-neutralization should reduce variance (exposure stripped)"
-    print(f"  [2] beta-neutral           OK   (corr(resid,beta) {np.corrcoef(resid, beta)[0,1]:+.2e})")
+    print(
+        f"  [2] beta-neutral           OK   (corr(resid,beta) {np.corrcoef(resid, beta)[0, 1]:+.2e})"
+    )
 
 
 # ── 3. Sector-neutralization demeans within each sector ───────────────────────
@@ -84,8 +90,11 @@ def test_neutralization_is_per_cross_section() -> None:
     # sim, so this guards against an accidental global fit.)
     cs1 = _cs(np.array([0.03, -0.02, 0.01, 0.04]), np.array([0.5, 1.0, 1.5, 2.0]), ["Crypto"] * 4)
     r1 = neutralize_returns(cs1, "beta")
-    cs2 = _cs(np.array([0.03, -0.02, 0.01, 0.04, 9.9, -9.9]),
-              np.array([0.5, 1.0, 1.5, 2.0, 5.0, -5.0]), ["Crypto"] * 6)
+    cs2 = _cs(
+        np.array([0.03, -0.02, 0.01, 0.04, 9.9, -9.9]),
+        np.array([0.5, 1.0, 1.5, 2.0, 5.0, -5.0]),
+        ["Crypto"] * 6,
+    )
     r2 = neutralize_returns(cs2, "beta")
     # r2's first four residuals differ from r1 because the OLS fit now includes the extra rows —
     # that's expected. The point being asserted is each call is self-contained (no hidden state /
@@ -104,7 +113,7 @@ def test_vol_target_is_causal() -> None:
     assert np.allclose(out[:10], rets[:10]), "warm-up periods must be 1x"
     # Mutating a FUTURE return must not change an earlier scaled value → strictly causal.
     rets2 = rets.copy()
-    rets2[150] += 5.0                                       # huge spike late in the stream
+    rets2[150] += 5.0  # huge spike late in the stream
     out2 = vol_target_stream(rets2, target_per_period=0.02, lookback=20, min_obs=10)
     assert np.allclose(out[:150], out2[:150]), "a future return changed a past leverage → LEAK"
     print("  [5] vol-target causal      OK   (future cannot move past leverage)")

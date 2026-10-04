@@ -11,6 +11,7 @@ leak-safety truncation-invariance of the feature block.
 Run:   pytest backend/prediction/test_sentiment_features.py -q
 Or:    python -m backend.prediction.test_sentiment_features
 """
+
 from __future__ import annotations
 
 import sys
@@ -23,15 +24,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.prediction import sentiment as S
 from backend.prediction import sentiment_features as SF
-from backend.prediction.sentiment_features import (
-    SENTIMENT_FEATURE_COLS, compute_sentiment_features)
+from backend.prediction.sentiment_features import SENTIMENT_FEATURE_COLS, compute_sentiment_features
 
 
 # ── Fake pipelines (callable like a transformers pipeline) ─────────────────────────
 def _fake_pipe(label_scores):
     """Return a callable that emits the same [{label,score},...] for every input text."""
+
     def _call(texts, **kw):
         return [[{"label": l, "score": s} for l, s in label_scores] for _ in texts]
+
     return _call
 
 
@@ -44,14 +46,26 @@ def _install_fakes():
 
 # ── 1. Label normalisation handles BOTH model vocabularies ─────────────────────────
 def _check_label_normalisation():
-    lbl, sc = S._normalise([{"label": "positive", "score": 0.8},
-                            {"label": "negative", "score": 0.1}, {"label": "neutral", "score": 0.1}])
+    lbl, sc = S._normalise(
+        [
+            {"label": "positive", "score": 0.8},
+            {"label": "negative", "score": 0.1},
+            {"label": "neutral", "score": 0.1},
+        ]
+    )
     assert lbl == "positive" and abs(sc - 0.7) < 1e-9, (lbl, sc)
     # CryptoBERT vocabulary (Bullish/Bearish) maps onto the same signed convention.
-    lbl, sc = S._normalise([{"label": "Bearish", "score": 0.7},
-                            {"label": "Bullish", "score": 0.2}, {"label": "Neutral", "score": 0.1}])
+    lbl, sc = S._normalise(
+        [
+            {"label": "Bearish", "score": 0.7},
+            {"label": "Bullish", "score": 0.2},
+            {"label": "Neutral", "score": 0.1},
+        ]
+    )
     assert lbl == "negative" and abs(sc - (-0.5)) < 1e-9, (lbl, sc)
-    print("  [1] label-normalisation     OK   (FinBERT pos/neg & CryptoBERT bull/bear -> signed [-1,1])")
+    print(
+        "  [1] label-normalisation     OK   (FinBERT pos/neg & CryptoBERT bull/bear -> signed [-1,1])"
+    )
 
 
 # ── 2. asset_type routing: equity->FinBERT, crypto->CryptoBERT ─────────────────────
@@ -61,7 +75,7 @@ def _check_routing():
     eq = S.score_texts(["x"], asset_type="equity")[0]
     cr = S.score_texts(["x"], asset_type="crypto")[0]
     assert eq[0] == "positive" and eq[1] > 0, eq
-    assert cr[0] == "negative" and cr[1] < 0, cr           # proves the crypto model (not FinBERT) ran
+    assert cr[0] == "negative" and cr[1] < 0, cr  # proves the crypto model (not FinBERT) ran
     print("  [2] asset_type-routing      OK   (equity->FinBERT +, crypto->CryptoBERT -)")
 
 
@@ -76,6 +90,7 @@ def _check_routed_batch():
 # ── 4. CryptoBERT fallback: if the crypto model can't load, degrade to FinBERT ─────
 def _check_fallback(monkeypatch=None):
     import types
+
     S._pipes.clear()
     fin = _fake_pipe([("positive", 0.9), ("negative", 0.05), ("neutral", 0.05)])
 
@@ -89,7 +104,7 @@ def _check_fallback(monkeypatch=None):
     saved = {k: sys.modules.get(k) for k in ("transformers", "torch")}
     sys.modules["transformers"], sys.modules["torch"] = fake_tf, fake_torch
     try:
-        pipe = S._load_pipe("crypto")                      # must fall back, not raise
+        pipe = S._load_pipe("crypto")  # must fall back, not raise
         assert pipe is fin, "crypto load failure did not fall back to FinBERT"
     finally:
         for k, v in saved.items():
@@ -105,7 +120,7 @@ def _check_fallback(monkeypatch=None):
 def _synthetic_gdelt(sym="TEST", n=400):
     dates = pd.date_range("2022-01-01", periods=n, freq="D")
     rng = np.random.default_rng(0)
-    tone = np.cumsum(rng.normal(0, 0.4, n)).clip(-15, 15)     # autocorrelated tone walk
+    tone = np.cumsum(rng.normal(0, 0.4, n)).clip(-15, 15)  # autocorrelated tone walk
     vol = rng.integers(5, 200, n)
     return pd.DataFrame({"symbol": sym, "date": dates, "tone": tone, "vol": vol})
 
@@ -123,7 +138,7 @@ def _patch_panels(monkeypatch, gdelt, av=None):
 
 # ── 5. Neutral when there is no coverage (all-zero, so dropna spares the row) ───────
 def _check_neutral(monkeypatch):
-    _patch_panels(monkeypatch, pd.DataFrame())               # empty panels
+    _patch_panels(monkeypatch, pd.DataFrame())  # empty panels
     sf = compute_sentiment_features("AAPL", _price_frame())
     assert list(sf.columns) == SENTIMENT_FEATURE_COLS and sf.index.equals(_price_frame().index)
     assert (sf.to_numpy() == 0.0).all(), "no-coverage block must be all-zero (neutral)"
@@ -139,9 +154,11 @@ def _check_populated(monkeypatch):
     assert np.isfinite(sf.to_numpy()).all(), "non-finite sentiment feature"
     active = int((sf.abs() > 1e-9).any().sum())
     assert active >= 3, f"covered symbol should populate tone cols, got {active}"
-    other = compute_sentiment_features("AAPL", price)        # not in the synthetic panel
+    other = compute_sentiment_features("AAPL", price)  # not in the synthetic panel
     assert (other.to_numpy() == 0.0).all(), "uncovered symbol must stay neutral"
-    print(f"  [6] populated-and-finite    OK   (TEST {active}/5 cols active; uncovered symbol neutral)")
+    print(
+        f"  [6] populated-and-finite    OK   (TEST {active}/5 cols active; uncovered symbol neutral)"
+    )
 
 
 # ── 7. Leak-safety: truncating future price rows can't move earlier feature values ──
@@ -158,15 +175,32 @@ def _check_leak_safe(monkeypatch):
 
 
 # ── pytest entry points ────────────────────────────────────────────────────────────
-def test_label_normalisation():  _check_label_normalisation()
-def test_routing():              _check_routing()
-def test_routed_batch():         _check_routed_batch()
-def test_fallback():             _check_fallback()
+def test_label_normalisation():
+    _check_label_normalisation()
 
 
-def test_neutral(monkeypatch):    _check_neutral(monkeypatch)
-def test_populated(monkeypatch):  _check_populated(monkeypatch)
-def test_leak_safe(monkeypatch):  _check_leak_safe(monkeypatch)
+def test_routing():
+    _check_routing()
+
+
+def test_routed_batch():
+    _check_routed_batch()
+
+
+def test_fallback():
+    _check_fallback()
+
+
+def test_neutral(monkeypatch):
+    _check_neutral(monkeypatch)
+
+
+def test_populated(monkeypatch):
+    _check_populated(monkeypatch)
+
+
+def test_leak_safe(monkeypatch):
+    _check_leak_safe(monkeypatch)
 
 
 if __name__ == "__main__":
@@ -179,8 +213,13 @@ if __name__ == "__main__":
     import contextlib
 
     class _MP:
-        def __init__(self): self._undo = []
-        def setattr(self, obj, name, val): self._undo.append((obj, name, getattr(obj, name))); setattr(obj, name, val)
+        def __init__(self):
+            self._undo = []
+
+        def setattr(self, obj, name, val):
+            self._undo.append((obj, name, getattr(obj, name)))
+            setattr(obj, name, val)
+
         def undo(self):
             for obj, name, val in reversed(self._undo):
                 setattr(obj, name, val)
@@ -190,5 +229,6 @@ if __name__ == "__main__":
     for fn in (_check_neutral, _check_populated, _check_leak_safe):
         with contextlib.suppress(Exception):
             pass
-        fn(mp); mp.undo()
+        fn(mp)
+        mp.undo()
     print("All sentiment tests passed.")

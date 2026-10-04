@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 
 import httpx
-import numpy as np
 import pandas as pd
 
 from ..config import settings
@@ -39,10 +38,10 @@ log = logging.getLogger("flux.prediction.fred")
 
 # Whitelist: FRED series id -> internal column name. Only these ids are ever requested.
 FRED_SERIES = {
-    "DGS10": "dgs10",          # 10-Year Treasury yield
-    "DGS2": "dgs2",            # 2-Year Treasury yield
-    "FEDFUNDS": "fed_funds",   # Effective Federal Funds rate
-    "CPIAUCSL": "cpi",         # CPI (level → we derive YoY)
+    "DGS10": "dgs10",  # 10-Year Treasury yield
+    "DGS2": "dgs2",  # 2-Year Treasury yield
+    "FEDFUNDS": "fed_funds",  # Effective Federal Funds rate
+    "CPIAUCSL": "cpi",  # CPI (level → we derive YoY)
     "BAA10Y": "credit_spread",  # Moody's Baa corporate yield − 10Y Treasury = credit risk premium
 }
 _FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -54,10 +53,15 @@ async def _fetch_series(series_id: str, start: str) -> pd.Series:
         return pd.Series(dtype=float)
     try:
         async with httpx.AsyncClient(timeout=20.0) as cli:
-            r = await cli.get(_FRED_URL, params={
-                "series_id": series_id, "api_key": settings.FRED_API_KEY,
-                "file_type": "json", "observation_start": start,
-            })
+            r = await cli.get(
+                _FRED_URL,
+                params={
+                    "series_id": series_id,
+                    "api_key": settings.FRED_API_KEY,
+                    "file_type": "json",
+                    "observation_start": start,
+                },
+            )
             r.raise_for_status()
             obs = r.json().get("observations", [])
     except Exception as exc:
@@ -66,10 +70,11 @@ async def _fetch_series(series_id: str, start: str) -> pd.Series:
     idx, vals = [], []
     for o in obs:
         v = o.get("value")
-        if v in (None, ".", ""):                              # FRED marks missing as "."
+        if v in (None, ".", ""):  # FRED marks missing as "."
             continue
         try:
-            vals.append(float(v)); idx.append(pd.Timestamp(o["date"]))
+            vals.append(float(v))
+            idx.append(pd.Timestamp(o["date"]))
         except (ValueError, KeyError):
             continue
     return pd.Series(vals, index=pd.DatetimeIndex(idx), name=FRED_SERIES[series_id])
@@ -89,13 +94,13 @@ def compute_fred_features(raw: pd.DataFrame) -> pd.DataFrame:
     if {"dgs10", "dgs2"} <= set(df.columns):
         out["term_spread"] = df["dgs10"] - df["dgs2"]
     if "credit_spread" in df.columns:
-        out["credit_spread"] = df["credit_spread"]        # Baa − 10Y, already a spread (daily)
+        out["credit_spread"] = df["credit_spread"]  # Baa − 10Y, already a spread (daily)
     if "dgs10" in df.columns:
         out["dgs10"] = df["dgs10"]
     if "fed_funds" in df.columns:
         out["fed_funds"] = df["fed_funds"]
     if "cpi" in df.columns:
-        out["cpi_yoy"] = df["cpi"].pct_change(365) * 100.0    # YoY % (daily index → 365d)
+        out["cpi_yoy"] = df["cpi"].pct_change(365) * 100.0  # YoY % (daily index → 365d)
     return out.dropna(how="all")
 
 
@@ -126,13 +131,19 @@ if __name__ == "__main__":
             return
         print("No FRED_API_KEY set -> verifying the transform on synthetic data:")
         idx = pd.to_datetime(["2020-01-01", "2020-07-01", "2021-01-01", "2021-07-01"])
-        raw = pd.DataFrame({"dgs10": [1.8, 0.7, 1.1, 1.5], "dgs2": [1.5, 0.2, 0.2, 0.3],
-                            "fed_funds": [1.6, 0.1, 0.1, 0.1],
-                            "cpi": [258.0, 259.0, 262.0, 271.0]}, index=idx)
+        raw = pd.DataFrame(
+            {
+                "dgs10": [1.8, 0.7, 1.1, 1.5],
+                "dgs2": [1.5, 0.2, 0.2, 0.3],
+                "fed_funds": [1.6, 0.1, 0.1, 0.1],
+                "cpi": [258.0, 259.0, 262.0, 271.0],
+            },
+            index=idx,
+        )
         feat = compute_fred_features(raw)
         ts = feat["term_spread"].dropna()
         print(f"  term_spread sample: {ts.iloc[0]:.2f} (expect 0.30 on 2020-01-01)")
-        print(f"  cpi_yoy on 2021-01-01: {feat.loc['2021-01-01','cpi_yoy']:.2f}% (expect ~1.55%)")
+        print(f"  cpi_yoy on 2021-01-01: {feat.loc['2021-01-01', 'cpi_yoy']:.2f}% (expect ~1.55%)")
         print(f"  columns: {list(feat.columns)}  rows: {len(feat)}")
         assert abs(ts.iloc[0] - 0.30) < 1e-6, "term spread transform wrong"
         print("  transform OK")

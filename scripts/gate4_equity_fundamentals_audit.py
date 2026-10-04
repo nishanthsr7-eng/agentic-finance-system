@@ -32,6 +32,7 @@ Four sections, each a hard pass/fail:
 Run:  python scripts/gate4_equity_fundamentals_audit.py        (exit 0 = all pass, 1 = any failure)
 Heavy: builds the ~138k-event panel twice + trains the purged-OOF model twice (a few minutes).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,8 +47,8 @@ import numpy as np  # noqa: E402
 
 # Locked Phase-3 reference numbers (scripts/gate4_equity_fundamentals_eval.py / gate4_equity_fundamentals_eval.log) — soft guard only.
 LOCKED = {"equity": 0.5107, "crypto": 0.5209, "pooled": 0.5158}
-MARGIN = 1e-3      # an AUC delta within +/-MARGIN is a "tie"
-TIE_BAND = 2e-3    # the equity delta must stay inside this band (no spurious lift, no real decline)
+MARGIN = 1e-3  # an AUC delta within +/-MARGIN is a "tie"
+TIE_BAND = 2e-3  # the equity delta must stay inside this band (no spurious lift, no real decline)
 CRYPTO_GUARD = 5e-3
 DRIFT_WARN = 5e-3  # warn (don't fail) if a BASE AUC drifts this far from the locked number
 
@@ -70,19 +71,23 @@ def _check(name: str, fn) -> None:
 def _auc_pair(y, base, aug, mask):
     """AUC of base & aug on the SAME rows (mask AND both-tested). (auc_base, auc_aug, n)."""
     from sklearn.metrics import roc_auc_score
+
     common = mask & ~np.isnan(base) & ~np.isnan(aug)
     yt = y[common]
     if yt.size == 0 or yt.min() == yt.max():
         return float("nan"), float("nan"), int(common.sum())
-    return (float(roc_auc_score(yt, base[common])),
-            float(roc_auc_score(yt, aug[common])), int(common.sum()))
+    return (
+        float(roc_auc_score(yt, base[common])),
+        float(roc_auc_score(yt, aug[common])),
+        int(common.sum()),
+    )
 
 
 async def _main() -> int:
     from backend.prediction import test_equity_features as t4
-    from backend.prediction.train import load_dataset, evaluate_oof
-    from backend.prediction.equity_features import EQUITY_FEATURE_COLS
     from backend.prediction.datasources import CRYPTO_SYMBOLS
+    from backend.prediction.equity_features import EQUITY_FEATURE_COLS
+    from backend.prediction.train import evaluate_oof, load_dataset
 
     print("=" * 78)
     print("  PHASE-4 AUDIT - equity fundamentals block: correctness + non-disruption")
@@ -91,15 +96,22 @@ async def _main() -> int:
     # ── A. Leak-safety & correctness (reuse the unit checks for one self-contained report) ──
     print("\n[A] LEAK-SAFETY & CORRECTNESS  (equity_features.py unit checks)")
     p_aapl, p_btc = await t4._setup()
-    _check("A1 causality (filing + daily truncation-invariance)", lambda: t4._check_filing_causality(p_aapl))
-    _check("A2 equity block finite + index-aligned + populated", lambda: t4._check_equity_block(p_aapl))
+    _check(
+        "A1 causality (filing + daily truncation-invariance)",
+        lambda: t4._check_filing_causality(p_aapl),
+    )
+    _check(
+        "A2 equity block finite + index-aligned + populated", lambda: t4._check_equity_block(p_aapl)
+    )
     _check("A3 crypto / unknown symbol neutral (all-zero)", lambda: t4._check_crypto_neutral(p_btc))
-    _check("A4 point-in-time (neutral before first filing)", lambda: t4._check_point_in_time(p_aapl))
+    _check(
+        "A4 point-in-time (neutral before first filing)", lambda: t4._check_point_in_time(p_aapl)
+    )
     _check("A5 YTD->single-quarter reconstruction + YoY", t4._check_quarterly_reconstruction)
 
     # ── B. Non-disruption: build the production panel OFF vs ON and prove additive + neutral ──
     print("\n[B] NON-DISRUPTION  (production panel: FLUX_EQUITY_FEATURES 0 vs 1)")
-    os.environ["FLUX_CRYPTO_FEATURES"] = "0"          # isolate: only the equity flag varies
+    os.environ["FLUX_CRYPTO_FEATURES"] = "0"  # isolate: only the equity flag varies
     os.environ["FLUX_EQUITY_FEATURES"] = "0"
     print("  building OFF panel (production default) ...")
     _Xoff, yoff, woff, _t1off, cols_off, _f0, doff = await load_dataset()
@@ -113,7 +125,9 @@ async def _main() -> int:
     equity = ~crypto
 
     def b_rowset():
-        assert len(doff) == len(don), f"row count changed {len(doff)} -> {len(don)} (block dropped/added rows!)"
+        assert len(doff) == len(don), (
+            f"row count changed {len(doff)} -> {len(don)} (block dropped/added rows!)"
+        )
         assert np.array_equal(doff["_sym"].values, don["_sym"].values), "symbol ordering changed"
         assert np.array_equal(doff["_y"].values, don["_y"].values), "labels changed"
         assert np.allclose(doff["_w"].values, don["_w"].values), "sample weights changed"
@@ -123,7 +137,9 @@ async def _main() -> int:
     def b_additive_cols():
         assert added == sorted(EQUITY_FEATURE_COLS), f"ON added != the 5 equity cols: {added}"
         assert not (set(cols_off) & set(EQUITY_FEATURE_COLS)), "OFF panel already leaks equity cols"
-        assert len(base_cols) == len(cols_off) == 42, f"base feature count drifted: {len(base_cols)} / {len(cols_off)}"
+        assert len(base_cols) == len(cols_off) == 42, (
+            f"base feature count drifted: {len(base_cols)} / {len(cols_off)}"
+        )
         return f"+{len(added)} cols exactly {added}; base stays {len(cols_off)}"
 
     def b_base_identical():
@@ -132,19 +148,25 @@ async def _main() -> int:
             d = float(np.max(np.abs(doff[c].values - don[c].values)))
             if d > worst:
                 worst, worstcol = d, c
-        assert worst < 1e-9, f"base column '{worstcol}' changed by {worst:.2e} when the block was joined"
+        assert worst < 1e-9, (
+            f"base column '{worstcol}' changed by {worst:.2e} when the block was joined"
+        )
         return f"all {len(base_cols)} base columns byte-identical (max abs diff {worst:.1e})"
 
     def b_crypto_neutral():
         cv = don.loc[crypto, EQUITY_FEATURE_COLS].values
         assert crypto.sum() > 0, "no crypto rows in panel?!"
-        assert np.abs(cv).max() == 0.0, "crypto rows are NOT all-zero in the equity block (contamination)"
+        assert np.abs(cv).max() == 0.0, (
+            "crypto rows are NOT all-zero in the equity block (contamination)"
+        )
         return f"{crypto.sum():,} crypto rows all-zero in equity cols (dropna() spares them)"
 
     def b_equity_active():
         ev = don.loc[equity, EQUITY_FEATURE_COLS]
         active = int((ev.abs().to_numpy() > 1e-9).any(axis=0).sum())
-        assert active >= 4, f"equity rows barely populate the block ({active}/5) — block may be inert"
+        assert active >= 4, (
+            f"equity rows barely populate the block ({active}/5) — block may be inert"
+        )
         return f"{equity.sum():,} equity rows populate {active}/5 equity cols"
 
     _check("B1 row set / labels / weights / dates unchanged", b_rowset)
@@ -170,7 +192,9 @@ async def _main() -> int:
 
     def c_equity_tie():
         d = deltas["equity"]
-        assert d <= MARGIN, f"equity AUC shows an unexpected lift (+{d:.4f}) — re-run GATE-4 before shipping"
+        assert d <= MARGIN, (
+            f"equity AUC shows an unexpected lift (+{d:.4f}) — re-run GATE-4 before shipping"
+        )
         assert d >= -TIE_BAND, f"equity AUC declines beyond noise ({d:+.4f}) — investigate"
         return f"equity delta {d:+.4f} -> within-noise TIE; keep self-gated OFF (decision stands)"
 
@@ -184,7 +208,9 @@ async def _main() -> int:
         worst = max(drift.values())
         msg = "  ".join(f"{k}={aucs[k]:.4f}(lock {LOCKED[k]:.4f})" for k in LOCKED)
         if worst > DRIFT_WARN:
-            print(f"    NOTE: BASE arm drifted from locked numbers (worst {worst:.4f}) — DB may have changed.")
+            print(
+                f"    NOTE: BASE arm drifted from locked numbers (worst {worst:.4f}) — DB may have changed."
+            )
         return f"BASE {msg}; worst drift {worst:.4f}"
 
     _check("C1 equity-subset OOF AUC tie (no structural lift)", c_equity_tie)
@@ -193,14 +219,20 @@ async def _main() -> int:
 
     # ── D. Earnings-gate integrity (the Phase-3.1 gate this phase expanded into a feature) ──
     print("\n[D] EARNINGS-GATE INTEGRITY  (earnings.py - expanded gate->feature must not regress)")
-    from backend.prediction.earnings import apply_gate, _valid_symbol
+    from backend.prediction.earnings import _valid_symbol, apply_gate
 
     def d_gate_downscales():
-        g = apply_gate({"confidence": 80, "kelly_frac": 0.10},
-                       {"in_window": True, "factor": 0.5, "days_to_earnings": 2})
-        assert g["confidence"] == 40 and g["kelly_frac"] == 0.05 and g["earnings_soon"], f"gate math wrong: {g}"
-        u = apply_gate({"confidence": 80, "kelly_frac": 0.10},
-                       {"in_window": False, "factor": 1.0, "days_to_earnings": 30})
+        g = apply_gate(
+            {"confidence": 80, "kelly_frac": 0.10},
+            {"in_window": True, "factor": 0.5, "days_to_earnings": 2},
+        )
+        assert g["confidence"] == 40 and g["kelly_frac"] == 0.05 and g["earnings_soon"], (
+            f"gate math wrong: {g}"
+        )
+        u = apply_gate(
+            {"confidence": 80, "kelly_frac": 0.10},
+            {"in_window": False, "factor": 1.0, "days_to_earnings": 30},
+        )
         assert u["confidence"] == 80 and not u["earnings_soon"], "gate fired outside window"
         return "in-window halves confidence/kelly; out-of-window is a no-op"
 
@@ -218,8 +250,12 @@ async def _main() -> int:
     print("\n" + "=" * 78)
     if nfail == 0:
         print(f"  PHASE-4 AUDIT: ALL {npass} CHECKS PASS")
-        print("  Block is leak-safe, purely additive (production unchanged when OFF, neutral when ON),")
-        print("  GATE-4 reproduces (within-noise tie -> stays self-gated OFF), earnings gate intact.")
+        print(
+            "  Block is leak-safe, purely additive (production unchanged when OFF, neutral when ON),"
+        )
+        print(
+            "  GATE-4 reproduces (within-noise tie -> stays self-gated OFF), earnings gate intact."
+        )
     else:
         print(f"  PHASE-4 AUDIT: {nfail} FAILED / {npass} passed")
         for name, ok, detail in _results:

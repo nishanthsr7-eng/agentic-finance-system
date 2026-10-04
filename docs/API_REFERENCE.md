@@ -6,6 +6,10 @@ included routers). Base URL in development: `http://localhost:8000`.
 Interactive docs are available at `http://localhost:8000/docs` (Swagger) and
 `/redoc` while the server is running.
 
+**Access levels.** 🔒 = needs a logged-in user (`Authorization: Bearer <token>`).
+🛠 = maintenance route, needs `X-Admin-Token` matching the `ADMIN_TOKEN` env
+var; with `ADMIN_TOKEN` unset these always answer 403.
+
 ---
 
 ## System
@@ -13,7 +17,7 @@ Interactive docs are available at `http://localhost:8000/docs` (Swagger) and
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Liveness plus cache, scheduler, Chroma, ingestion, Ollama, and key status |
-| POST | `/cache/flush` | Invalidate the crypto/stock quote caches |
+| POST | `/cache/flush` 🛠 | Invalidate the crypto/stock quote caches |
 
 ## Live Market Data
 
@@ -22,7 +26,7 @@ Interactive docs are available at `http://localhost:8000/docs` (Swagger) and
 | GET | `/market/quotes/crypto` | Top-15 cryptocurrencies (CoinGecko, cached 30s) |
 | GET | `/market/quotes/stocks` | 15 curated equities (Finnhub, cached 60s) |
 | GET | `/market/summary` | Highlight strip: top crypto + biggest stock movers |
-| GET | `/market/candles/{asset}?tf=1D\|7D\|1M\|1Y` | OHLCV candles (nifty, btc, eth) |
+| GET | `/market/candles/{asset}?tf=1D\|7D\|1M\|1Y` | OHLCV candles (btc, eth, spy); unknown asset → 404 |
 | GET | `/market/indicators/{symbol}` | Volume(14d), RSI(14), MACD(12,26,9) |
 | GET | `/market/news?q=` | Finance headlines; `q` filters by asset |
 
@@ -40,39 +44,39 @@ Interactive docs are available at `http://localhost:8000/docs` (Swagger) and
 | Method | Path | Description |
 |---|---|---|
 | GET | `/ingestion/status` | Scheduler status and per-job last-run metadata |
-| POST | `/ingestion/trigger/{job}` | Trigger a job: `crypto`, `stocks`, `ohlcv`, `news`, `market`, `insights`, `predictions` |
+| POST | `/ingestion/trigger/{job}` 🛠 | Trigger a job: `crypto`, `stocks`, `ohlcv`, `news`, `market`, `insights`, `predictions` |
 
 ## Prediction Agent
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/predict/{symbol}?fresh=false` | Latest calibrated prediction (stored, or `fresh=true` to recompute) |
+| GET | `/predict/{symbol}?fresh=false` | Latest calibrated prediction (stored, or `fresh=true` 🛠 to recompute) |
 | GET | `/predict/{symbol}/history?limit=` | Past predictions joined with realised outcomes |
 | GET | `/predict/{symbol}/forecast?lookback=` | Chart bundle: close series + prediction point + conformal band |
-| POST | `/predict/{symbol}/verify` | Run the LLM verifier (downgrade/veto only) |
+| POST | `/predict/{symbol}/verify` 🔒 | Run the LLM verifier (downgrade/veto only) |
 | GET | `/predict/{symbol}/verdict` | Latest persisted verifier verdict for a symbol |
 | GET | `/predict/verdicts?limit=` | Latest verifier verdict per symbol |
 | GET | `/predict/leaderboard?limit=` | Latest prediction per symbol, ranked by calibrated confidence |
 | GET | `/predict/calibration?model=live` | Realised hit-rate per confidence bucket (reliability curve) |
-| POST | `/predict/run?symbol=` | Generate + persist predictions now; resolve matured ones |
+| POST | `/predict/run?symbol=` 🛠 | Generate + persist predictions now; resolve matured ones |
 
 ## AI Insights, Chat, RAG
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/ai/insights?limit=&symbol=` | Latest pre-computed AI insights |
-| POST | `/ai/insights/refresh` | Trigger an immediate insight cycle |
-| GET | `/ai/intel/{symbol}` | Structured per-asset analysis (JSON) |
-| POST | `/ai/chat` | Non-streaming chat via Ollama |
-| POST | `/ai/chat/stream` | Streaming chat (Server-Sent Events) |
-| POST | `/ai/rag/query` | RAG-grounded financial Q&A |
+| POST | `/ai/insights/refresh` 🛠 | Trigger an immediate insight cycle |
+| GET | `/ai/intel/{symbol}` 🔒 | Structured per-asset analysis (JSON) |
+| POST | `/ai/chat` 🔒 | Non-streaming chat via Ollama |
+| POST | `/ai/chat/stream` 🔒 | Streaming chat (Server-Sent Events) |
+| POST | `/ai/rag/query` 🔒 | RAG-grounded financial Q&A |
 
 ## Portfolio and Backtesting
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/portfolio/value` | Mark-to-market valuation in INR (auth required) |
-| POST | `/backtest` | SMA-crossover backtest via yfinance |
+| POST | `/backtest` 🔒 | SMA-crossover backtest via yfinance |
 
 ## Routers (included)
 

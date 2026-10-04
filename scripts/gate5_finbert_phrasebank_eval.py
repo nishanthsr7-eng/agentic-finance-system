@@ -13,6 +13,7 @@ scorer, not a throwaway. Reports accuracy + macro-F1 + per-class precision/recal
     python scripts/gate5_finbert_phrasebank_eval.py                 # default: 75%-agreement split
     python scripts/gate5_finbert_phrasebank_eval.py --agree AllAgree --limit 1000
 """
+
 from __future__ import annotations
 
 import sys
@@ -42,7 +43,9 @@ def _confusion(gold: list[str], pred: list[str]) -> pd.DataFrame:
     m = np.zeros((3, 3), int)
     for g, p in zip(gold, pred):
         m[idx[g], idx.get(p, 1)] += 1
-    return pd.DataFrame(m, index=[f"true_{l}" for l in _LABELS], columns=[f"pred_{l}" for l in _LABELS])
+    return pd.DataFrame(
+        m, index=[f"true_{l}" for l in _LABELS], columns=[f"pred_{l}" for l in _LABELS]
+    )
 
 
 def _metrics(cm: pd.DataFrame) -> tuple[float, float, dict]:
@@ -71,16 +74,19 @@ def main() -> int:
     df = _load(agree)
     if limit:
         df = df.sample(min(limit, len(df)), random_state=42).reset_index(drop=True)
-    print(f"Financial PhraseBank ({agree}): {len(df):,} sentences "
-          f"({df['label'].value_counts().to_dict()})")
+    print(
+        f"Financial PhraseBank ({agree}): {len(df):,} sentences "
+        f"({df['label'].value_counts().to_dict()})"
+    )
     print("Scoring with FinBERT via sentiment.score_texts (equity model) ...")
 
     from backend.prediction.sentiment import score_texts
+
     texts = df["sentence"].astype(str).tolist()
     pred = []
     B = 256
     for i in range(0, len(texts), B):
-        pred.extend(lbl for lbl, _ in score_texts(texts[i:i + B], asset_type="equity"))
+        pred.extend(lbl for lbl, _ in score_texts(texts[i : i + B], asset_type="equity"))
         print(f"  scored {min(i + B, len(texts)):,}/{len(texts):,}", end="\r")
     print()
 
@@ -92,14 +98,18 @@ def main() -> int:
     print(f"    {'class':10}{'precision':>11}{'recall':>9}{'f1':>9}{'support':>9}")
     for l in _LABELS:
         p = per[l]
-        print(f"    {l:10}{p['precision']:>11.3f}{p['recall']:>9.3f}{p['f1']:>9.3f}{p['support']:>9}")
+        print(
+            f"    {l:10}{p['precision']:>11.3f}{p['recall']:>9.3f}{p['f1']:>9.3f}{p['support']:>9}"
+        )
     print("\n  confusion matrix:")
     print("    " + cm.to_string().replace("\n", "\n    "))
     # Quality bar: FinBERT is well-documented at ~0.85+ accuracy on this set; flag if far below.
     ok = acc >= 0.80
     note = "" if ok else "  (below 0.80 - check model/cache/label mapping)"
-    print(f"\n  GATE-5 (item 3) scoring-quality: accuracy {acc:.4f} "
-          f"{'>=' if ok else '<'} 0.80 -> {'PASS' if ok else 'REVIEW'}{note}")
+    print(
+        f"\n  GATE-5 (item 3) scoring-quality: accuracy {acc:.4f} "
+        f"{'>=' if ok else '<'} 0.80 -> {'PASS' if ok else 'REVIEW'}{note}"
+    )
     return 0 if ok else 1
 
 

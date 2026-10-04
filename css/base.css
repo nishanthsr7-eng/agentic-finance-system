@@ -78,3 +78,16 @@ a:hover {
   background-color: var(--accent-teal-glow);
   box-shadow: 0 4px 20px var(--accent-teal-glow);
 }
+
+/* Visually hidden but read by screen readers and search engines */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

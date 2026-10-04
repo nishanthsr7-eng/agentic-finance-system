@@ -88,8 +88,12 @@ def triple_barrier(
             labels[t], rets[t], barriers[t], t1_pos[t] = lab, r, "timeout", end
 
     out = pd.DataFrame(
-        {"label": labels, "ret": rets, "barrier": barriers, "t1": [
-            idx[p] if p >= 0 else pd.NaT for p in t1_pos]},
+        {
+            "label": labels,
+            "ret": rets,
+            "barrier": barriers,
+            "t1": [idx[p] if p >= 0 else pd.NaT for p in t1_pos],
+        },
         index=idx,
     )
     return out.dropna(subset=["label"])
@@ -112,13 +116,13 @@ def uniqueness_weights(events: pd.DataFrame, close_index: pd.Index) -> pd.Series
             spans.append((-1, -1))
             continue
         a, b = pos[t0], pos[t1]
-        concurrency[a:b + 1] += 1
+        concurrency[a : b + 1] += 1
         spans.append((a, b))
 
     inv = np.divide(1.0, concurrency, out=np.zeros_like(concurrency), where=concurrency > 0)
     weights = np.zeros(len(spans))
     for i, (a, b) in enumerate(spans):
-        weights[i] = inv[a:b + 1].mean() if a >= 0 else 0.0
+        weights[i] = inv[a : b + 1].mean() if a >= 0 else 0.0
 
     w = pd.Series(weights, index=events.index)
     # Normalise so weights average 1.0 (keeps learning-rate scale intuitive).

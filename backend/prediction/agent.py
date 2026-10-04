@@ -29,10 +29,9 @@ import json
 import logging
 import time
 
-from ..config import settings
-from ..db import insert_insight, get_symbol_sentiment
-from ..insights import _ollama_call, _strip_fences          # reuse the existing Ollama plumbing
-from .predict import predict, ACT_THRESHOLD
+from ..db import get_symbol_sentiment, insert_insight
+from ..insights import _ollama_call, _strip_fences  # reuse the existing Ollama plumbing
+from .predict import ACT_THRESHOLD, predict
 
 log = logging.getLogger("flux.prediction.agent")
 
@@ -78,8 +77,9 @@ def _news_block(symbol: str, rows: list[dict], k: int = 5) -> str:
     return "\n".join(f"- {t}" for t in titles) if titles else "- (no recent headlines)"
 
 
-async def verify_prediction(symbol: str, prediction: dict | None = None,
-                            persist: bool = True) -> dict | None:
+async def verify_prediction(
+    symbol: str, prediction: dict | None = None, persist: bool = True
+) -> dict | None:
     """
     Run the calibrated model prediction through the LLM verifier. Returns the prediction
     augmented with the LLM verdict and the ENFORCED final confidence / act / veto.
@@ -98,15 +98,22 @@ async def verify_prediction(symbol: str, prediction: dict | None = None,
         sent_rows = []
     try:
         from ..rag import rag_query
+
         rag_ctx, _n = rag_query(f"{symbol} stock outlook catalysts risks earnings guidance")
     except Exception:
         rag_ctx = ""
 
     prompt = _VERIFIER_PROMPT.format(
-        symbol=symbol, direction=p["direction"], model_confidence=model_conf,
-        meta_prob=p["meta_prob"], act_threshold=ACT_THRESHOLD,
-        band_pct=p.get("band_pct", 80), conf_low=p.get("conf_low"), conf_high=p.get("conf_high"),
-        pred_price=p.get("pred_price"), regime=p.get("regime", "trend"),
+        symbol=symbol,
+        direction=p["direction"],
+        model_confidence=model_conf,
+        meta_prob=p["meta_prob"],
+        act_threshold=ACT_THRESHOLD,
+        band_pct=p.get("band_pct", 80),
+        conf_low=p.get("conf_low"),
+        conf_high=p.get("conf_high"),
+        pred_price=p.get("pred_price"),
+        regime=p.get("regime", "trend"),
         sentiment=p.get("sentiment", 0.0),
         news_block=_news_block(symbol, sent_rows),
         rag_block=(rag_ctx[:1500] if rag_ctx else "- (no additional context)"),
@@ -117,23 +124,35 @@ async def verify_prediction(symbol: str, prediction: dict | None = None,
     try:
         raw = await _ollama_call(prompt)
         data = json.loads(_strip_fences(raw))
-    except RuntimeError as exc:                                # Ollama down / not running
+    except RuntimeError as exc:  # Ollama down / not running
         log.warning("verifier unavailable for %s: %s", symbol, exc)
-        return {**p, "verifier": "unavailable", "model_confidence": model_conf,
-                "final_confidence": model_conf, "final_act": bool(p["act"]),
-                "veto": False, "rationale": None}
+        return {
+            **p,
+            "verifier": "unavailable",
+            "model_confidence": model_conf,
+            "final_confidence": model_conf,
+            "final_act": bool(p["act"]),
+            "veto": False,
+            "rationale": None,
+        }
     except (json.JSONDecodeError, ValueError) as exc:
         log.warning("verifier parse failed for %s: %s | raw=%s", symbol, exc, raw[:120])
-        return {**p, "verifier": "parse_error", "model_confidence": model_conf,
-                "final_confidence": model_conf, "final_act": bool(p["act"]),
-                "veto": False, "rationale": None}
+        return {
+            **p,
+            "verifier": "parse_error",
+            "model_confidence": model_conf,
+            "final_confidence": model_conf,
+            "final_act": bool(p["act"]),
+            "veto": False,
+            "rationale": None,
+        }
 
     # ── Enforce the honesty contract (LLM can only lower / veto) ──────────────────
     llm_conf = int(data.get("confidence", model_conf))
     veto = bool(data.get("veto", False)) or bool(data.get("contradicts_model", False))
-    final_conf = max(0, min(model_conf, llm_conf))             # never above the calibrated ceiling
+    final_conf = max(0, min(model_conf, llm_conf))  # never above the calibrated ceiling
     if veto:
-        final_conf = min(final_conf, model_conf // 2)          # vetoed signals are heavily downgraded
+        final_conf = min(final_conf, model_conf // 2)  # vetoed signals are heavily downgraded
     final_act = bool(p["act"]) and not veto
     final_kelly = 0.0 if veto else p.get("kelly_frac", 0.0)
 
@@ -145,33 +164,41 @@ async def verify_prediction(symbol: str, prediction: dict | None = None,
         f"final {final_conf}%. {rationale} Risk: {risks}"
     )
 
-    verdict.update({
-        **p,
-        "model_confidence": model_conf,
-        "llm_confidence": llm_conf,
-        "final_confidence": final_conf,
-        "final_act": final_act,
-        "final_kelly_frac": round(final_kelly, 4),
-        "veto": veto,
-        "agree": bool(data.get("agree", False)),
-        "contradicts_model": bool(data.get("contradicts_model", False)),
-        "rationale": rationale,
-        "risks": risks,
-        "key_levels": str(data.get("key_levels", "")).strip(),
-    })
+    verdict.update(
+        {
+            **p,
+            "model_confidence": model_conf,
+            "llm_confidence": llm_conf,
+            "final_confidence": final_conf,
+            "final_act": final_act,
+            "final_kelly_frac": round(final_kelly, 4),
+            "veto": veto,
+            "agree": bool(data.get("agree", False)),
+            "contradicts_model": bool(data.get("contradicts_model", False)),
+            "rationale": rationale,
+            "risks": risks,
+            "key_levels": str(data.get("key_levels", "")).strip(),
+        }
+    )
 
     if persist:
         try:
-            await insert_insight({
-                "symbol": symbol, "insight_type": "prediction", "content": content,
-                "sentiment": "bearish" if p["direction"] == "DOWN" else "bullish",
-                "confidence": final_conf, "generated_at": int(time.time() * 1000),
-            })
+            await insert_insight(
+                {
+                    "symbol": symbol,
+                    "insight_type": "prediction",
+                    "content": content,
+                    "sentiment": "bearish" if p["direction"] == "DOWN" else "bullish",
+                    "confidence": final_conf,
+                    "generated_at": int(time.time() * 1000),
+                }
+            )
         except Exception as exc:
             log.warning("verifier persist failed for %s: %s", symbol, exc)
 
-    log.info("Verifier %s: model %d%% -> final %d%% (veto=%s)",
-             symbol, model_conf, final_conf, veto)
+    log.info(
+        "Verifier %s: model %d%% -> final %d%% (veto=%s)", symbol, model_conf, final_conf, veto
+    )
     return verdict
 
 
@@ -182,8 +209,9 @@ def _conviction(p: dict) -> float:
     return (float(p.get("prob_up", 0.5)) - 0.5) * float(meta if meta is not None else 0.0)
 
 
-async def verify_portfolio(predictions: list[dict] | None = None, top_k: int = 5,
-                           persist: bool = True) -> list[dict]:
+async def verify_portfolio(
+    predictions: list[dict] | None = None, top_k: int = 5, persist: bool = True
+) -> list[dict]:
     """
     Red-team the TOP-K portfolio names through the Layer-3 verifier (Phase 8).
 
@@ -200,14 +228,15 @@ async def verify_portfolio(predictions: list[dict] | None = None, top_k: int = 5
     """
     if predictions is None:
         from .predict import predict_all
+
         predictions = await predict_all()
     ranked = sorted((p for p in predictions if p), key=_conviction, reverse=True)
 
     verdicts: list[dict] = []
-    for p in ranked[:max(0, top_k)]:
+    for p in ranked[: max(0, top_k)]:
         try:
             v = await verify_prediction(p["symbol"], prediction=p, persist=persist)
-        except Exception as exc:                               # one bad name never sinks the batch
+        except Exception as exc:  # one bad name never sinks the batch
             log.warning("verify_portfolio %s failed: %s", p.get("symbol"), exc)
             continue
         if v:
@@ -218,10 +247,16 @@ async def verify_portfolio(predictions: list[dict] | None = None, top_k: int = 5
             verdicts.append(v)
 
     n_veto = sum(1 for v in verdicts if v.get("veto"))
-    n_down = sum(1 for v in verdicts
-                 if int(v.get("final_confidence", 0)) < int(v.get("model_confidence", 0)))
-    log.info("Portfolio verify: %d/%d names reviewed | %d veto | %d downgraded",
-             len(verdicts), min(top_k, len(ranked)), n_veto, n_down)
+    n_down = sum(
+        1 for v in verdicts if int(v.get("final_confidence", 0)) < int(v.get("model_confidence", 0))
+    )
+    log.info(
+        "Portfolio verify: %d/%d names reviewed | %d veto | %d downgraded",
+        len(verdicts),
+        min(top_k, len(ranked)),
+        n_veto,
+        n_down,
+    )
     return verdicts
 
 
@@ -229,17 +264,22 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
         from backend.db import init_db
+
         await init_db()
         v = await verify_prediction("AAPL")
         if not v:
-            print("no prediction"); return
-        print(f"model={v.get('model_confidence', v['confidence'])}% "
-              f"llm={v.get('llm_confidence')}% final={v.get('final_confidence')}% "
-              f"veto={v.get('veto')} verifier={v.get('verifier')}")
+            print("no prediction")
+            return
+        print(
+            f"model={v.get('model_confidence', v['confidence'])}% "
+            f"llm={v.get('llm_confidence')}% final={v.get('final_confidence')}% "
+            f"veto={v.get('veto')} verifier={v.get('verifier')}"
+        )
         print("rationale:", v.get("rationale"))
 
     asyncio.run(_demo())

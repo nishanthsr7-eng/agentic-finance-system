@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /pages/dashboard
+Disallow: /pages/advisor
+Disallow: /pages/analysis
+Disallow: /pages/marketplace
+Disallow: /pages/payments
+
+Sitemap: https://nishanth-flux.pages.dev/sitemap.xml

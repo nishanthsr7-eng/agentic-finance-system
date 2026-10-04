@@ -141,7 +141,12 @@ What it does, in order:
 3. **Compare against baselines** — persistence, always-up, and majority. The
    model must beat them out-of-sample or the features need work.
 4. **Calibrate** probabilities (isotonic) and report **Expected Calibration
-   Error (ECE)**.
+   Error (ECE)** out of sample: each walk-forward fold is scored by a calibrator
+   fit only on earlier folds (`ece_calibrated_oos`), and the per-fold ECEs are
+   averaged. Scoring the calibrator on the rows it was fit on gives ~0 and means
+   nothing. The meta-model report and the backtest/ensemble signals use the same
+   earlier-folds-only calibration (`calibrate_oos`); only the serving calibrator
+   is fit on all out-of-fold rows.
 5. **Fit conformal bands** on the purged splitter, shaped by GARCH conditional
    volatility, and report empirical coverage.
 6. **Refit** on all data and **persist** the model, calibrator, conformal
@@ -153,7 +158,7 @@ Run it:
 python backend/prediction/train.py
 ```
 
-Persisted artifacts (`models/`, git-ignored) include the XGBoost primary and
+Persisted artifacts (`backend/prediction/models/`, tracked in git so the API image ships them) include the XGBoost primary and
 meta models, scaler, frac-diff parameters, isotonic calibrator, conformal
 object, HMM, and `model_meta.json` (the recorded baseline metrics).
 
@@ -217,6 +222,23 @@ flywheel (logging, resolution, drift-triggered retraining, paper forward-test) b
 Every model is compared against four baselines — persistence, ARIMA,
 "always up," and **Chronos zero-shot**. If it cannot beat all four out-of-sample
 after costs, the features are fixed rather than the net being tuned.
+
+### Current results (retrain of 2026-10-04, data to 2026-10-03)
+
+Out of fold, 133,753 predictions over 29 symbols (`models/model_meta.json`):
+
+| Metric | Result | Target met? |
+|---|---|---|
+| Direction accuracy / AUC | 0.528 / 0.522 (always-up 0.531) | No: no edge on raw accuracy |
+| Top 10% / 5% most confident | 0.551 / 0.560 | Small ranking edge |
+| Meta "act" filter (thr 0.60) | 54.4% precision at 12.8% coverage (all calls 53.5%) | Small |
+| ECE raw / calibrated (OOS) | 0.031 / 0.022 | Yes (< 5%) |
+| Conformal 80% / 90% coverage | 80.0% / 90.0% | Yes |
+| Point return MAE vs no change | 0.0541 vs 0.0535 | No: shown greyed out in the UI |
+| Regime stack (GATE-6) | AUC 0.536 vs best base 0.537 | No: self-gated off |
+
+The live counterpart is the Advisor's Model Trust panel: realised hit rate per
+confidence bucket and the range hit rate (`in_band`) of matured predictions.
 
 ---
 

@@ -43,7 +43,7 @@
       if (d <= maxDay) txs.push(tx(y, m, d, title, amount, category, account));
     };
     push(1,  'Salary — Acme Corp',       salaryBase[v],  'income');
-    push(2,  'Groww — NIFTY50 ETF',      -45000,         'investment');
+    push(2,  'Vanguard S&P 500 SIP',     -45000,         'investment');
     push(3,  'BigBasket / Groceries',    -groceryAmt[v], 'essentials');
     push(4,  'ChatGPT Plus',             -1800,          'subscription');
     push(5,  'AWS Cloud Services',       -8500,          'business');
@@ -115,4 +115,7 @@
   localStorage.setItem('flux_protocols',    JSON.stringify([true, true, true]));
   localStorage.setItem('flux_reward_states', JSON.stringify({}));
   localStorage.setItem('flux_seeded', SEED_VERSION);
+  // Marks everything above as sample data; js/flux-data.js shows a badge while
+  // it is set and clears it once real data has loaded from the API.
+  localStorage.setItem('flux_sample_data', '1');
 })();

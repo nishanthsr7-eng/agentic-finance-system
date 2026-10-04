@@ -64,6 +64,7 @@ def _describe(exc: Exception) -> str:
 
 # ── Provider resolution ──────────────────────────────────────────────────────
 
+
 def provider() -> str:
     """Active transport: "openai" or "ollama"."""
     p = (settings.LLM_PROVIDER or "").strip().lower()
@@ -111,6 +112,7 @@ async def aclose() -> None:
 
 # ── Chat (non-streaming) ─────────────────────────────────────────────────────
 
+
 async def chat(
     messages: list[dict[str, str]],
     *,
@@ -135,9 +137,9 @@ async def _openai_chat(
     temperature: float | None,
 ) -> str:
     payload: dict = {
-        "model":    model_name(),
+        "model": model_name(),
         "messages": messages,
-        "stream":   False,
+        "stream": False,
     }
     if temperature is not None:
         payload["temperature"] = temperature
@@ -164,9 +166,9 @@ async def _openai_chat(
 
 async def _ollama_chat(messages: list[dict[str, str]], *, timeout: float) -> str:
     payload = {
-        "model":    settings.OLLAMA_MODEL,
+        "model": settings.OLLAMA_MODEL,
         "messages": messages,
-        "stream":   False,
+        "stream": False,
     }
     try:
         r = await _http().post(
@@ -183,6 +185,7 @@ async def _ollama_chat(messages: list[dict[str, str]], *, timeout: float) -> str
 
 
 # ── Chat (streaming) ─────────────────────────────────────────────────────────
+
 
 async def stream_chat(
     messages: list[dict[str, str]],
@@ -270,6 +273,7 @@ async def _ollama_stream(
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
+
 
 async def health() -> tuple[bool, str]:
     """

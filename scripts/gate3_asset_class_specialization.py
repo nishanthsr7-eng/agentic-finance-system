@@ -19,6 +19,7 @@ pooled model.
 
     python scripts/gate3_asset_class_specialization.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,12 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np  # noqa: E402
 from sklearn.metrics import roc_auc_score  # noqa: E402
 
-MARGIN = 1e-3   # a class delta within ±MARGIN is a "tie" (no lift); strict pass needs a real gain
+MARGIN = 1e-3  # a class delta within ±MARGIN is a "tie" (no lift); strict pass needs a real gain
 
 
 def _oof_full(X, y, w, t1, feat_cols):
     """Pooled OOF prob array (len N, NaN where never tested)."""
     from backend.prediction.train import evaluate_oof
+
     return evaluate_oof(X, y, w, t1, feat_cols)["_oof_p_full"]
 
 
@@ -43,6 +45,7 @@ def _expert_oof_full(X, y, w, t1, feat_cols, class_idx):
     """Train an expert on ONE class only; return a full-length OOF array (NaN off-class/untested).
     The subset of a date-sorted frame stays sorted, so subset position j -> full position pos[j]."""
     from backend.prediction.train import evaluate_oof
+
     pos = np.where(class_idx)[0]
     sub = evaluate_oof(X.iloc[pos], y[pos], w[pos], t1.iloc[pos], feat_cols)["_oof_p_full"]
     out = np.full(len(y), np.nan)
@@ -56,19 +59,25 @@ def _auc_pair(y, a, b, class_mask, name_a, name_b):
     yt = y[common]
     if yt.min() == yt.max():
         return float("nan"), float("nan"), int(common.sum())
-    return float(roc_auc_score(yt, a[common])), float(roc_auc_score(yt, b[common])), int(common.sum())
+    return (
+        float(roc_auc_score(yt, a[common])),
+        float(roc_auc_score(yt, b[common])),
+        int(common.sum()),
+    )
 
 
 async def _main():
-    from backend.prediction.train import load_dataset
     from backend.prediction.datasources import CRYPTO_SYMBOLS
+    from backend.prediction.train import load_dataset
 
     X, y, w, t1, feat_cols, _fd, data = await load_dataset()
     crypto = data["_sym"].isin(CRYPTO_SYMBOLS).values
     equity = ~crypto
     classes = {"crypto": crypto, "equity": equity}
-    print(f"Panel: {len(X):,} events ({crypto.sum():,} crypto / {equity.sum():,} equity) | "
-          f"{len(feat_cols)} features\n")
+    print(
+        f"Panel: {len(X):,} events ({crypto.sum():,} crypto / {equity.sum():,} equity) | "
+        f"{len(feat_cols)} features\n"
+    )
 
     # A. pooled
     pooled = _oof_full(X, y, w, t1, feat_cols)
@@ -98,8 +107,8 @@ async def _main():
             d = asp - ap
             deltas.append(d)
             print(f"    {cname:8}{n:>9,}{ap:>10.4f}{asp:>10.4f}{d:>+10.4f}")
-        not_worse = all(d >= -MARGIN for d in deltas)        # >= pooled on both (within noise)
-        real_lift = any(d > MARGIN for d in deltas)          # a genuine gain somewhere
+        not_worse = all(d >= -MARGIN for d in deltas)  # >= pooled on both (within noise)
+        real_lift = any(d > MARGIN for d in deltas)  # a genuine gain somewhere
         ok = not_worse and real_lift
         verdicts[label] = ok
         if ok:
@@ -114,8 +123,11 @@ async def _main():
     any_pass = any(verdicts.values())
     winner = next((k for k, v in verdicts.items() if v), None)
     print(f"  GATE-3: {'PASS via ' + winner if any_pass else 'FAIL — keep the pooled model'}")
-    print("  -> refactor train.py to adopt it." if any_pass else
-          "  -> no structural lift; keep the pooled model (the low-risk default).")
+    print(
+        "  -> refactor train.py to adopt it."
+        if any_pass
+        else "  -> no structural lift; keep the pooled model (the low-risk default)."
+    )
 
 
 if __name__ == "__main__":

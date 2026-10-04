@@ -11,6 +11,7 @@ Flow:
   run_predictions()      → log all symbols, return a confidence-ranked leaderboard
   resolve_due()          → for predictions whose horizon has elapsed, compute the realized
                            h-day return from `ohlcv_history`, write `prediction_outcomes`
+                           (incl. `in_band`: did the close land inside the 80% range)
   refresh_live_calibration() → bucket resolved outcomes by stated confidence → calibration_buckets
 
 Honesty note: the live outcome is the realized return over the prediction horizon (target_date
@@ -25,28 +26,47 @@ import time
 
 import pandas as pd
 
-from ..db import (get_history, insert_prediction, insert_outcome, get_due_predictions,
-                  get_resolved_outcomes, upsert_calibration)
+from ..db import (
+    get_due_predictions,
+    get_history,
+    get_resolved_outcomes,
+    insert_outcome,
+    insert_prediction,
+    upsert_calibration,
+)
 from .predict import predict, predict_all
 
 log = logging.getLogger("flux.prediction.serve")
 
-COST = 0.0005          # 5 bps round-trip cost + slippage (matches backtest.py)
+COST = 0.0005  # 5 bps round-trip cost + slippage (matches backtest.py)
 MODEL_TAG = "xgb_primary+meta+sentiment+conformal"
 
 
 def _to_row(p: dict) -> dict:
     """Map a predict() dict to the `predictions` table schema."""
     return {
-        "symbol": p["symbol"], "model": MODEL_TAG, "horizon_days": p["horizon_days"],
-        "direction": p["direction"], "prob_up": p["prob_up"], "meta_prob": p["meta_prob"],
-        "act": int(bool(p["act"])), "confidence": p["confidence"], "kelly_frac": p["kelly_frac"],
-        "sentiment": p.get("sentiment"), "last_close": p["last_close"],
-        "pred_return": p.get("pred_return"), "pred_price": p.get("pred_price"),
-        "conf_low": p.get("conf_low"), "conf_high": p.get("conf_high"),
-        "regime": p.get("regime"), "generated_at": int(time.time() * 1000),
+        "symbol": p["symbol"],
+        "model": MODEL_TAG,
+        "horizon_days": p["horizon_days"],
+        "direction": p["direction"],
+        "prob_up": p["prob_up"],
+        "meta_prob": p["meta_prob"],
+        "act": int(bool(p["act"])),
+        "confidence": p["confidence"],
+        "kelly_frac": p["kelly_frac"],
+        "sentiment": p.get("sentiment"),
+        "last_close": p["last_close"],
+        "pred_return": p.get("pred_return"),
+        "pred_price": p.get("pred_price"),
+        "conf_low": p.get("conf_low"),
+        "conf_high": p.get("conf_high"),
+        "conf_low_90": p.get("conf_low_90"),
+        "conf_high_90": p.get("conf_high_90"),
+        "regime": p.get("regime"),
+        "generated_at": int(time.time() * 1000),
         "target_date": p["target_date"],
-        "iv_atm": p.get("iv_atm"), "iv_skew": p.get("iv_skew"),
+        "iv_atm": p.get("iv_atm"),
+        "iv_skew": p.get("iv_skew"),
     }
 
 
@@ -64,7 +84,7 @@ async def run_predictions(symbols: list[str] | None = None, **kw) -> list[dict]:
     preds = await predict_all(symbols) if not kw else None
     out = []
     if preds is not None:
-        for p in preds:                                  # predict_all already ran the models
+        for p in preds:  # predict_all already ran the models
             try:
                 pid = await insert_prediction(_to_row(p))
                 out.append({**p, "id": pid})
@@ -73,8 +93,10 @@ async def run_predictions(symbols: list[str] | None = None, **kw) -> list[dict]:
     else:
         from ..db import history_summary
         from .train import EXCLUDE
-        syms = symbols or [r["symbol"] for r in await history_summary()
-                           if r["symbol"] not in EXCLUDE]
+
+        syms = symbols or [
+            r["symbol"] for r in await history_summary() if r["symbol"] not in EXCLUDE
+        ]
         for s in syms:
             r = await predict_and_log(s, **kw)
             if r:
@@ -104,16 +126,27 @@ async def resolve_due(as_of: str | None = None) -> int:
     for p in due:
         future_close = await _close_on_or_after(p["symbol"], p["target_date"])
         if future_close is None or not p.get("last_close"):
-            continue                                     # bar not in history yet → leave pending
+            continue  # bar not in history yet → leave pending
         actual = future_close / float(p["last_close"]) - 1.0
         correct = int((p["direction"] == "UP") == (actual > 0))
         side = 1 if p["direction"] == "UP" else -1
         pnl = (side * actual - COST) if p.get("act") else 0.0
-        await insert_outcome({
-            "prediction_id": p["id"], "actual_return": round(actual, 6),
-            "correct": correct, "pnl_after_costs": round(pnl, 6),
-            "resolved_at": int(time.time() * 1000),
-        })
+        lo, hi = p.get("conf_low"), p.get("conf_high")
+        in_band = (
+            int(float(lo) <= future_close <= float(hi))
+            if lo is not None and hi is not None
+            else None
+        )
+        await insert_outcome(
+            {
+                "prediction_id": p["id"],
+                "actual_return": round(actual, 6),
+                "correct": correct,
+                "pnl_after_costs": round(pnl, 6),
+                "in_band": in_band,
+                "resolved_at": int(time.time() * 1000),
+            }
+        )
         resolved += 1
     if resolved:
         log.info("Resolved %d predictions (as_of %s)", resolved, as_of)
@@ -131,9 +164,16 @@ async def refresh_live_calibration() -> int:
     ts = int(time.time() * 1000)
     out = []
     for b, g in df.groupby("bucket"):
-        out.append({"model": "live", "bucket": int(b), "stated_conf": (b + 0.5) / 10,
-                    "realized_hit": float(g["correct"].mean()), "n": int(len(g)),
-                    "updated_at": ts})
+        out.append(
+            {
+                "model": "live",
+                "bucket": int(b),
+                "stated_conf": (b + 0.5) / 10,
+                "realized_hit": float(g["correct"].mean()),
+                "n": int(len(g)),
+                "updated_at": ts,
+            }
+        )
     await upsert_calibration(out)
     log.info("Refreshed %d live calibration buckets from %d outcomes", len(out), len(df))
     return len(out)
@@ -147,18 +187,21 @@ async def daily_prediction_cycle(verify_top_k: int = 5) -> dict:
     it degrades gracefully if the LLM is unavailable, so the cycle never hard-depends on it.
     """
     from .regime import invalidate_regime_cache
-    invalidate_regime_cache()                            # refit the HMM once for this cycle, then
-    n_resolved = await resolve_due()                     # reuse the cached regime across all symbols
+
+    invalidate_regime_cache()  # refit the HMM once for this cycle, then
+    n_resolved = await resolve_due()  # reuse the cached regime across all symbols
     preds = await run_predictions()
 
     verified = 0
     if verify_top_k:
         try:
             from .agent import verify_portfolio
+
             verdicts = await verify_portfolio(preds, top_k=verify_top_k, persist=True)
-            verified = sum(1 for v in verdicts
-                           if v.get("verifier") not in ("unavailable", "parse_error"))
-        except Exception as exc:                         # the LLM layer must never break the flywheel
+            verified = sum(
+                1 for v in verdicts if v.get("verifier") not in ("unavailable", "parse_error")
+            )
+        except Exception as exc:  # the LLM layer must never break the flywheel
             log.warning("portfolio verify skipped: %s", exc)
     return {"resolved": n_resolved, "logged": len(preds), "verified": verified}
 
@@ -167,17 +210,23 @@ if __name__ == "__main__":
     import asyncio
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
     async def _demo():
         from backend.db import init_db
+
         await init_db()
         # Log a small batch, then resolve anything already mature (backfilled-history symbols
         # will have the target bar, so this exercises the full loop offline).
-        preds = await run_predictions(["AAPL", "NVDA", "BTC"], with_sentiment=False, with_regime=False)
+        preds = await run_predictions(
+            ["AAPL", "NVDA", "BTC"], with_sentiment=False, with_regime=False
+        )
         for p in preds:
-            print(f"  logged #{p['id']} {p['symbol']:5} {p['direction']:4} conf={p['confidence']} "
-                  f"band=[{p['conf_low']}, {p['conf_high']}]")
+            print(
+                f"  logged #{p['id']} {p['symbol']:5} {p['direction']:4} conf={p['confidence']} "
+                f"band=[{p['conf_low']}, {p['conf_high']}]"
+            )
         n = await resolve_due()
         print(f"resolved {n} matured predictions")
 

@@ -29,8 +29,8 @@ import yfinance as yf
 # Make `backend` importable when run as `python scripts/backfill_history.py`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend.db import init_db, insert_history, history_summary  # noqa: E402
-from backend.ingestion import STOCK_META                          # noqa: E402
+from backend.db import history_summary, init_db, insert_history  # noqa: E402
+from backend.ingestion import STOCK_META  # noqa: E402
 
 # ── Symbol universe ───────────────────────────────────────────────────────────
 # Stocks: reuse the live catalogue. DB label == ticker.
@@ -38,39 +38,39 @@ STOCK_SYMBOLS: dict[str, str] = {sym: sym for sym in STOCK_META}
 
 # Crypto: CoinGecko ids (ingestion.CRYPTO_IDS) → yfinance ticker → clean DB label.
 CRYPTO_SYMBOLS: dict[str, str] = {
-    "BTC-USD":  "BTC",
-    "ETH-USD":  "ETH",
-    "USDT-USD": "USDT",   # stablecoin — stored for completeness, skip when training
-    "BNB-USD":  "BNB",
-    "SOL-USD":  "SOL",
-    "XRP-USD":  "XRP",
+    "BTC-USD": "BTC",
+    "ETH-USD": "ETH",
+    "USDT-USD": "USDT",  # stablecoin — stored for completeness, skip when training
+    "BNB-USD": "BNB",
+    "SOL-USD": "SOL",
+    "XRP-USD": "XRP",
     "DOGE-USD": "DOGE",
-    "ADA-USD":  "ADA",
+    "ADA-USD": "ADA",
     "AVAX-USD": "AVAX",
-    "DOT-USD":  "DOT",
+    "DOT-USD": "DOT",
     "LINK-USD": "LINK",
-    "UNI7083-USD": "UNI",   # plain UNI-USD is delisted on yfinance; this is real Uniswap
-    "LTC-USD":  "LTC",
+    "UNI7083-USD": "UNI",  # plain UNI-USD is delisted on yfinance; this is real Uniswap
+    "LTC-USD": "LTC",
     "SHIB-USD": "SHIB",
-    "TRX-USD":  "TRX",
+    "TRX-USD": "TRX",
 }
 
 # Macro / market-context series (free, no key). Not prediction targets — used to build
 # cross-asset features (market return, volatility regime, rates) in train.load_dataset.
 MACRO_SYMBOLS: dict[str, str] = {
-    "^GSPC": "SPX",    # S&P 500 — broad market return
-    "^VIX":  "VIX",    # volatility index — risk-on/off regime
-    "^TNX":  "TNX",    # 10-year Treasury yield
+    "^GSPC": "SPX",  # S&P 500 — broad market return
+    "^VIX": "VIX",  # volatility index — risk-on/off regime
+    "^TNX": "TNX",  # 10-year Treasury yield
 }
 
 # yfinance ticker → (DB label, is_crypto)
 UNIVERSE: dict[str, tuple[str, bool]] = {
     **{tkr: (label, False) for tkr, label in STOCK_SYMBOLS.items()},
-    **{tkr: (label, True)  for tkr, label in CRYPTO_SYMBOLS.items()},
+    **{tkr: (label, True) for tkr, label in CRYPTO_SYMBOLS.items()},
     **{tkr: (label, False) for tkr, label in MACRO_SYMBOLS.items()},
 }
 
-_REQUEST_DELAY = 1.0   # seconds between symbols → avoid yfinance rate limits
+_REQUEST_DELAY = 1.0  # seconds between symbols → avoid yfinance rate limits
 
 
 def fetch_symbol(yf_ticker: str, label: str, is_crypto: bool) -> list[dict]:
@@ -93,35 +93,40 @@ def fetch_symbol(yf_ticker: str, label: str, is_crypto: bool) -> list[dict]:
     for ts, row in df.iterrows():
         close = clean(row["Close"])
         if close is None or close <= 0:
-            continue   # skip genuinely empty bars (e.g. early illiquid days)
+            continue  # skip genuinely empty bars (e.g. early illiquid days)
         # Crypto has no splits/dividends → adj_close == close.
         adj = close if is_crypto else (clean(row["Adj Close"]) if has_adj else close)
-        rows.append({
-            "symbol":    label,
-            "date":      str(ts.date()),
-            "open":      clean(row["Open"]),
-            "high":      clean(row["High"]),
-            "low":       clean(row["Low"]),
-            "close":     close,
-            "adj_close": adj if adj is not None else close,
-            "volume":    int(row.get("Volume", 0) or 0),
-        })
+        rows.append(
+            {
+                "symbol": label,
+                "date": str(ts.date()),
+                "open": clean(row["Open"]),
+                "high": clean(row["High"]),
+                "low": clean(row["Low"]),
+                "close": close,
+                "adj_close": adj if adj is not None else close,
+                "volume": int(row.get("Volume", 0) or 0),
+            }
+        )
     return rows
 
 
 async def main(only: list[str] | None = None) -> None:
-    await init_db()   # ensures ohlcv_history exists even if the app never ran
+    await init_db()  # ensures ohlcv_history exists even if the app never ran
 
     universe = UNIVERSE
     if only:
         wanted = {s.upper() for s in only}
         universe = {
-            tkr: meta for tkr, meta in UNIVERSE.items()
+            tkr: meta
+            for tkr, meta in UNIVERSE.items()
             if tkr.upper() in wanted or meta[0].upper() in wanted
         }
         if not universe:
-            print(f"No matching symbols for {only}. Known labels: "
-                  f"{sorted(m[0] for m in UNIVERSE.values())}")
+            print(
+                f"No matching symbols for {only}. Known labels: "
+                f"{sorted(m[0] for m in UNIVERSE.values())}"
+            )
             return
 
     print(f"Backfilling {len(universe)} symbols -> ohlcv_history\n")
@@ -147,6 +152,8 @@ async def main(only: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Backfill historical OHLCV into ohlcv_history.")
-    ap.add_argument("--symbols", nargs="*", help="Subset of tickers/labels (e.g. AAPL BTC). Default: all 30.")
+    ap.add_argument(
+        "--symbols", nargs="*", help="Subset of tickers/labels (e.g. AAPL BTC). Default: all 30."
+    )
     args = ap.parse_args()
     asyncio.run(main(args.symbols))

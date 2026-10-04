@@ -25,8 +25,13 @@ import pandas as pd
 from . import CRYPTO_SYMBOLS, DATASET_DIR, _to_day, tidy
 
 _FP = DATASET_DIR / "coinmetrics" / "onchain.csv"
-_RENAME = {"AdrActCnt": "adr_act", "TxCnt": "tx_cnt", "SplyCur": "sply_cur",
-           "CapMrktCurUSD": "cap_mkt_usd", "PriceUSD": "price_cm"}
+_RENAME = {
+    "AdrActCnt": "adr_act",
+    "TxCnt": "tx_cnt",
+    "SplyCur": "sply_cur",
+    "CapMrktCurUSD": "cap_mkt_usd",
+    "PriceUSD": "price_cm",
+}
 
 
 def load_coinmetrics(symbols: list[str] | None = None) -> pd.DataFrame:
@@ -53,8 +58,10 @@ if __name__ == "__main__":
     df = load_coinmetrics()
     assert not df.empty, "no Coin Metrics data — run scripts/dl_coinmetrics.py first"
     assert df.duplicated(["symbol", "date"]).sum() == 0
-    print(f"coinmetrics: {len(df):,} rows over {df.symbol.nunique()} symbols "
-          f"({df.date.min().date()}..{df.date.max().date()})")
+    print(
+        f"coinmetrics: {len(df):,} rows over {df.symbol.nunique()} symbols "
+        f"({df.date.min().date()}..{df.date.max().date()})"
+    )
     print("symbols:", sorted(df.symbol.unique()))
     print(df[df.symbol == "BTC"].tail(3).to_string(index=False))
     print("OK")

@@ -21,7 +21,7 @@ import pandas as pd
 from . import DATASET_DIR, _to_day, tidy
 
 _DIR = DATASET_DIR / "deribit"
-_CCY = {"BTC": "BTC", "ETH": "ETH"}     # file currency -> DB symbol (identity here)
+_CCY = {"BTC": "BTC", "ETH": "ETH"}  # file currency -> DB symbol (identity here)
 
 
 def _load_one(ccy: str, sym: str) -> pd.DataFrame:
@@ -31,12 +31,14 @@ def _load_one(ccy: str, sym: str) -> pd.DataFrame:
     raw = pd.read_csv(fp)
     if raw.empty or "close" not in raw:
         return pd.DataFrame()
-    out = pd.DataFrame({
-        "symbol": sym,
-        "date": _to_day(raw["date"]),
-        "dvol": pd.to_numeric(raw["close"], errors="coerce"),
-        "dvol_open": pd.to_numeric(raw["open"], errors="coerce"),
-    })
+    out = pd.DataFrame(
+        {
+            "symbol": sym,
+            "date": _to_day(raw["date"]),
+            "dvol": pd.to_numeric(raw["close"], errors="coerce"),
+            "dvol_open": pd.to_numeric(raw["open"], errors="coerce"),
+        }
+    )
     return out.dropna(subset=["dvol"])
 
 

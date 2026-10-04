@@ -4,7 +4,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Advisor | FLUX</title>
+  <title>Smart Advisor | Agentic AI Finance &amp; Stock Prediction</title>
+  <meta name="description" content="Calibrated XGBoost predictions with conformal uncertainty bands and an LLM verifier that can veto a signal.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300e5a0' stroke-width='2'%3E%3Cpath d='M13 2L3 14h9l-1 8 10-12h-9l1-8z'/%3E%3C/svg%3E">
+  <link rel="canonical" href="https://nishanth-flux.pages.dev/pages/advisor">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Agentic AI Finance &amp; Stock Prediction System">
+  <meta property="og:title" content="Smart Advisor | Agentic AI Finance &amp; Stock Prediction System">
+  <meta property="og:description" content="Calibrated XGBoost predictions with conformal uncertainty bands and an LLM verifier that can veto a signal.">
+  <meta property="og:url" content="https://nishanth-flux.pages.dev/pages/advisor">
+  <meta property="og:image" content="https://nishanth-flux.pages.dev/assets/images/og-image.png">
+  <meta property="og:image:width" content="1600">
+  <meta property="og:image:height" content="1000">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Smart Advisor | Agentic AI Finance &amp; Stock Prediction System">
+  <meta name="twitter:description" content="Calibrated XGBoost predictions with conformal uncertainty bands and an LLM verifier that can veto a signal.">
+  <meta name="twitter:image" content="https://nishanth-flux.pages.dev/assets/images/og-image.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -101,7 +116,6 @@
               <div class="asset-tabs" id="asset-tabs">
                 <button class="asset-tab active" data-asset="BTC">BTC</button>
                 <button class="asset-tab" data-asset="ETH">ETH</button>
-                <button class="asset-tab" data-asset="NIFTY">NIFTY</button>
               </div>
               <div class="chart-live">
                 <div class="cl-price" id="cl-price">—</div>
@@ -139,15 +153,6 @@
                 <div class="sig-sub" id="sig-conf-sub">calibrated</div>
               </div>
               <div class="sig-tile">
-                <div class="sig-lbl">Target <span id="sig-h">5d</span></div>
-                <div class="sig-val skel" id="sig-target"></div>
-                <div class="sig-sub" id="sig-target-sub">—</div>
-              </div>
-              <div class="sig-tile">
-                <div class="sig-lbl"><span id="sig-band-pct">80</span>% band</div>
-                <div class="sig-val skel" id="sig-band"></div>
-              </div>
-              <div class="sig-tile">
                 <div class="sig-lbl">Position</div>
                 <div class="sig-val skel" id="sig-size"></div>
                 <div class="sig-sub" id="sig-size-sub">Kelly</div>
@@ -157,6 +162,15 @@
                 <div class="sig-val skel" id="sig-regime"></div>
                 <div class="sig-sub" id="sig-sent">—</div>
               </div>
+            </div>
+
+            <!-- ── 5-DAY OUTLOOK: the calibrated price range, re-based to the live price ── -->
+            <div class="outlook" id="outlook">
+              <div class="ol-head">
+                <span class="ol-title"><span id="ol-h">5</span>-day outlook</span>
+                <span class="ol-meta" id="ol-meta">—</span>
+              </div>
+              <div class="ol-body" id="ol-body"><span class="skel skel-note"></span></div>
             </div>
           </section>
 

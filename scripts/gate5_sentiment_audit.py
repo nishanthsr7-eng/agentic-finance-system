@@ -28,6 +28,7 @@ and the unit tests (``test_sentiment_features.py``). Five hard sections:
 Run:  python scripts/gate5_sentiment_audit.py      (exit 0 = all pass, 1 = any failure)
 Heavy: builds the production panel twice + scores a PhraseBank sample (a few minutes).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -57,8 +58,14 @@ def _check(name: str, fn) -> None:
 
 class _MP:
     """Minimal monkeypatch shim so the audit can reuse the unit-test check functions."""
-    def __init__(self): self._u = []
-    def setattr(self, o, n, v): self._u.append((o, n, getattr(o, n))); setattr(o, n, v)
+
+    def __init__(self):
+        self._u = []
+
+    def setattr(self, o, n, v):
+        self._u.append((o, n, getattr(o, n)))
+        setattr(o, n, v)
+
     def undo(self):
         for o, n, v in reversed(self._u):
             setattr(o, n, v)
@@ -67,9 +74,9 @@ class _MP:
 
 async def _main() -> int:
     from backend.prediction import test_sentiment_features as t5
-    from backend.prediction.train import load_dataset, evaluate_oof
-    from backend.prediction.sentiment_features import SENTIMENT_FEATURE_COLS
     from backend.prediction.datasources import CRYPTO_SYMBOLS
+    from backend.prediction.sentiment_features import SENTIMENT_FEATURE_COLS
+    from backend.prediction.train import evaluate_oof, load_dataset
 
     print("=" * 78)
     print("  PHASE-5 AUDIT - multi-source sentiment: correctness + non-disruption")
@@ -84,9 +91,11 @@ async def _main() -> int:
 
     # ── B. Feature-block safety (synthetic panel) ──
     print("\n[B] FEATURE-BLOCK SAFETY  (sentiment_features.py leak-safety + neutral-fill)")
-    for label, fn in (("B1 neutral when no coverage (all-zero)", t5._check_neutral),
-                      ("B2 populated + finite on a covered symbol", t5._check_populated),
-                      ("B3 leak-safe (truncation-invariant)", t5._check_leak_safe)):
+    for label, fn in (
+        ("B1 neutral when no coverage (all-zero)", t5._check_neutral),
+        ("B2 populated + finite on a covered symbol", t5._check_populated),
+        ("B3 leak-safe (truncation-invariant)", t5._check_leak_safe),
+    ):
         _check(label, lambda f=fn: _run_with_mp(f, _MP()))
 
     # ── C. Non-disruption: production panel OFF vs ON ──
@@ -114,7 +123,9 @@ async def _main() -> int:
 
     def c_additive():
         assert added == sorted(SENTIMENT_FEATURE_COLS), f"ON added != the 5 sentiment cols: {added}"
-        assert not (set(cols_off) & set(SENTIMENT_FEATURE_COLS)), "OFF panel already leaks sentiment cols"
+        assert not (set(cols_off) & set(SENTIMENT_FEATURE_COLS)), (
+            "OFF panel already leaks sentiment cols"
+        )
         return f"+{len(added)} cols exactly {added}; base stays {len(cols_off)}"
 
     def c_base_identical():
@@ -129,7 +140,7 @@ async def _main() -> int:
     def c_sentiment_finite():
         sv = don[SENTIMENT_FEATURE_COLS].to_numpy()
         assert np.isfinite(sv).all(), "non-finite value in the sentiment block"
-        return f"5 sentiment cols finite; coverage {coverage:,}/{len(don):,} rows ({coverage/len(don):.1%})"
+        return f"5 sentiment cols finite; coverage {coverage:,}/{len(don):,} rows ({coverage / len(don):.1%})"
 
     _check("C1 row set / labels / weights / dates unchanged", c_rowset)
     _check("C2 exactly the 5 sentiment cols added, base unchanged", c_additive)
@@ -141,16 +152,27 @@ async def _main() -> int:
 
     def d_phrasebank():
         import pandas as pd
+
         from backend.prediction.sentiment import score_texts
-        fp = Path(__file__).resolve().parents[1] / "Dataset" / "financial_phrasebank" / "Sentences_75Agree.csv"
+
+        fp = (
+            Path(__file__).resolve().parents[1]
+            / "Dataset"
+            / "financial_phrasebank"
+            / "Sentences_75Agree.csv"
+        )
         if not fp.exists():
             return "SKIP - PhraseBank csv not found"
         df = pd.read_csv(fp)
         df["label"] = df["label"].str.strip().str.lower()
         df = df[df["label"].isin(["negative", "neutral", "positive"])].sample(400, random_state=42)
-        pred = [lbl for lbl, _ in score_texts(df["sentence"].astype(str).tolist(), asset_type="equity")]
+        pred = [
+            lbl for lbl, _ in score_texts(df["sentence"].astype(str).tolist(), asset_type="equity")
+        ]
         acc = float(np.mean([p == g for p, g in zip(pred, df["label"].tolist())]))
-        assert acc >= 0.80, f"FinBERT PhraseBank accuracy {acc:.3f} < 0.80 (scoring quality regressed)"
+        assert acc >= 0.80, (
+            f"FinBERT PhraseBank accuracy {acc:.3f} < 0.80 (scoring quality regressed)"
+        )
         return f"FinBERT accuracy {acc:.3f} on 400 sampled sentences (>= 0.80)"
 
     _check("D1 FinBERT scoring quality on PhraseBank", d_phrasebank)
@@ -158,14 +180,27 @@ async def _main() -> int:
     # ── E. GATE-5 status (coverage-aware) ──
     print("\n[E] GATE-5 STATUS  (coverage-aware OOF comparison)")
     if coverage == 0:
-        print("  No sentiment coverage in caches -> AUG == BASE by construction (tie for lack of data).")
-        print("  Back-fill GDELT/AV and re-run scripts/gate5_sentiment_eval.py to test for real lift.")
-        _results.append(("E1 GATE-5 coverage report", True, "no coverage -> tie by construction (block neutral)"))
-        print("  PASS  E1 GATE-5 coverage report   no coverage -> tie by construction (block neutral)")
+        print(
+            "  No sentiment coverage in caches -> AUG == BASE by construction (tie for lack of data)."
+        )
+        print(
+            "  Back-fill GDELT/AV and re-run scripts/gate5_sentiment_eval.py to test for real lift."
+        )
+        _results.append(
+            (
+                "E1 GATE-5 coverage report",
+                True,
+                "no coverage -> tie by construction (block neutral)",
+            )
+        )
+        print(
+            "  PASS  E1 GATE-5 coverage report   no coverage -> tie by construction (block neutral)"
+        )
     else:
         crypto = don["_sym"].isin(CRYPTO_SYMBOLS).values
         classes = {"equity": ~crypto, "crypto": crypto, "pooled": np.ones(len(yon), bool)}
         from sklearn.metrics import roc_auc_score
+
         base = evaluate_oof(Xon, yon, won, t1on, base_cols)["_oof_p_full"]
         aug = evaluate_oof(Xon, yon, won, t1on, cols_on)["_oof_p_full"]
         print(f"    {'class':8}{'n':>9}{'base':>10}{'+sent':>10}{'delta':>10}")
@@ -177,10 +212,17 @@ async def _main() -> int:
                 ab, aa = roc_auc_score(yt, base[common]), roc_auc_score(yt, aug[common])
                 if cname == "pooled":
                     pooled_delta = aa - ab
-                print(f"    {cname:8}{int(common.sum()):>9,}{ab:>10.4f}{aa:>10.4f}{aa-ab:>+10.4f}")
-        _check("E1 GATE-5 OOF (pooled not worse beyond noise)",
-               lambda: (_ for _ in ()).throw(AssertionError(f"pooled AUC dropped {pooled_delta:+.4f}"))
-               if pooled_delta < -2e-3 else f"pooled delta {pooled_delta:+.4f}")
+                print(
+                    f"    {cname:8}{int(common.sum()):>9,}{ab:>10.4f}{aa:>10.4f}{aa - ab:>+10.4f}"
+                )
+        _check(
+            "E1 GATE-5 OOF (pooled not worse beyond noise)",
+            lambda: (
+                (_ for _ in ()).throw(AssertionError(f"pooled AUC dropped {pooled_delta:+.4f}"))
+                if pooled_delta < -2e-3
+                else f"pooled delta {pooled_delta:+.4f}"
+            ),
+        )
 
     # ── Verdict ──
     npass = sum(ok for _, ok, _ in _results)
@@ -188,8 +230,12 @@ async def _main() -> int:
     print("\n" + "=" * 78)
     if nfail == 0:
         print(f"  PHASE-5 AUDIT: ALL {npass} CHECKS PASS")
-        print("  Routing is correct (FinBERT/CryptoBERT by asset_type, normalised, graceful fallback),")
-        print("  the trainable block is leak-safe + purely additive (production unchanged), FinBERT scoring")
+        print(
+            "  Routing is correct (FinBERT/CryptoBERT by asset_type, normalised, graceful fallback),"
+        )
+        print(
+            "  the trainable block is leak-safe + purely additive (production unchanged), FinBERT scoring"
+        )
         print("  quality is confirmed, and GATE-5 status is reported honestly.")
     else:
         print(f"  PHASE-5 AUDIT: {nfail} FAILED / {npass} passed")

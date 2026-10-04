@@ -84,7 +84,7 @@ def _parse(raw: str, n: int) -> list[tuple[str, float]]:
         log.warning("LLM sentiment: no JSON array in reply (%.80s)", text)
         return out
     try:
-        items = json.loads(text[start:end + 1])
+        items = json.loads(text[start : end + 1])
     except json.JSONDecodeError as exc:
         log.warning("LLM sentiment: unparseable JSON (%s)", exc)
         return out
@@ -119,27 +119,26 @@ async def score_texts_llm(texts: list[str], asset_type: str = "equity") -> list[
     out: list[tuple[str, float]] = []
 
     for start in range(0, len(texts), BATCH):
-        chunk = texts[start:start + BATCH]
+        chunk = texts[start : start + BATCH]
         # Headlines can contain newlines; collapsing them keeps the numbering
         # unambiguous, and truncation keeps one long article summary from
         # crowding out the rest of the batch.
-        listing = "\n".join(
-            f"{i}. {' '.join(t.split())[:280]}" for i, t in enumerate(chunk)
-        )
+        listing = "\n".join(f"{i}. {' '.join(t.split())[:280]}" for i, t in enumerate(chunk))
         try:
             reply = await llm.chat(
                 [
                     {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": _PROMPT.format(
-                        domain=domain, n=len(chunk), items=listing)},
+                    {
+                        "role": "user",
+                        "content": _PROMPT.format(domain=domain, n=len(chunk), items=listing),
+                    },
                 ],
                 timeout=45.0,
-                temperature=0.0,      # classification, not generation
+                temperature=0.0,  # classification, not generation
             )
             out.extend(_parse(reply, len(chunk)))
         except Exception as exc:
-            log.warning("LLM sentiment batch failed (%s) — %d headlines neutral",
-                        exc, len(chunk))
+            log.warning("LLM sentiment batch failed (%s) — %d headlines neutral", exc, len(chunk))
             out.extend([("neutral", 0.0)] * len(chunk))
 
     return out
@@ -148,4 +147,5 @@ async def score_texts_llm(texts: list[str], asset_type: str = "equity") -> list[
 def available() -> bool:
     """True if a chat model is configured to score with."""
     from ..config import settings
+
     return bool(settings.LLM_API_KEY) or llm.provider() == "ollama"

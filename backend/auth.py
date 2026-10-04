@@ -37,11 +37,12 @@ import secrets
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from . import mysql_db as M
 from .config import settings
+from .ratelimit import rate_limit
 
 log = logging.getLogger("flux.auth")
 
@@ -50,10 +51,11 @@ auth_router = APIRouter(prefix="/auth", tags=["auth"])
 TOKEN_TTL_SECONDS = 24 * 3600
 PBKDF2_ITERATIONS = 260_000
 DEMO_USER_ID = 1
-DEMO_PASSWORD = "FluxDemo@123"   # seeded for user 1 only if they have no password yet
+DEMO_PASSWORD = "FluxDemo@123"  # seeded for user 1 only if they have no password yet
 
 
 # ── Secret resolution ────────────────────────────────────────────────────────
+
 
 def _secret_path() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / ".local" / "share")) / "flux"
@@ -78,6 +80,7 @@ _SECRET = _load_secret()
 
 # ── Password hashing ─────────────────────────────────────────────────────────
 
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
@@ -101,6 +104,7 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ── Token mint / verify ──────────────────────────────────────────────────────
 
+
 def _b64u(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
@@ -110,7 +114,9 @@ def _b64u_dec(s: str) -> bytes:
 
 
 def mint_token(user_id: int) -> str:
-    payload = _b64u(json.dumps({"uid": user_id, "exp": int(time.time()) + TOKEN_TTL_SECONDS}).encode())
+    payload = _b64u(
+        json.dumps({"uid": user_id, "exp": int(time.time()) + TOKEN_TTL_SECONDS}).encode()
+    )
     sig = _b64u(hmac.new(_SECRET, payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{sig}"
 
@@ -132,6 +138,7 @@ def verify_token(token: str) -> int | None:
 
 # ── FastAPI dependency ───────────────────────────────────────────────────────
 
+
 def require_user(authorization: str | None = Header(default=None)) -> int:
     """Resolve the authenticated user id from `Authorization: Bearer <token>`.
 
@@ -148,20 +155,28 @@ def require_user(authorization: str | None = Header(default=None)) -> int:
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
-# ── Schema migration + demo seed (called from startup) ──────────────────────
+def is_admin(token: str | None) -> bool:
+    """True only when ADMIN_TOKEN is configured and `token` matches it."""
+    expected = settings.ADMIN_TOKEN
+    return bool(expected) and bool(token) and hmac.compare_digest(token, expected)
+
+
+def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
+    """Gate maintenance routes on the `X-Admin-Token` header. Fails closed:
+    with ADMIN_TOKEN unset, every call is refused."""
+    if not is_admin(x_admin_token):
+        raise HTTPException(status_code=403, detail="Admin token required")
+
+
+# ── Demo credential seed (called from startup) ──────────────────────
+
 
 def ensure_auth_schema() -> None:
-    """Add users.password_hash if missing; give the demo user a known password
-    so the seeded dataset stays usable after auth goes mandatory."""
+    """Give the demo user a known password so the seeded dataset stays usable
+    after auth goes mandatory. (users.password_hash itself comes from
+    backend/migrations/002_users_password_hash.py.)"""
     try:
-        cols = M.query("SHOW COLUMNS FROM users LIKE 'password_hash'")
-        if not cols:
-            with M.get_conn() as conn, conn.cursor() as cur:
-                cur.execute("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) NULL")
-            log.info("users.password_hash column added")
-        demo = M.query_one(
-            "SELECT id, password_hash FROM users WHERE id=%s", (DEMO_USER_ID,)
-        )
+        demo = M.query_one("SELECT id, password_hash FROM users WHERE id=%s", (DEMO_USER_ID,))
         if demo and not demo.get("password_hash"):
             with M.get_conn() as conn, conn.cursor() as cur:
                 cur.execute(
@@ -178,6 +193,7 @@ def ensure_auth_schema() -> None:
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
+
 class RegisterRequest(BaseModel):
     name: str
     email: str
@@ -193,7 +209,7 @@ def _public_user(row: dict) -> dict:
     return {k: v for k, v in row.items() if k != "password_hash"}
 
 
-@auth_router.post("/register")
+@auth_router.post("/register", dependencies=[Depends(rate_limit("register", 3, 60))])
 def register(body: RegisterRequest) -> dict:
     name = body.name.strip()
     email = body.email.strip().lower()
@@ -216,12 +232,16 @@ def register(body: RegisterRequest) -> dict:
     return {"token": mint_token(uid), "user": _public_user(user)}
 
 
-@auth_router.post("/login")
+@auth_router.post("/login", dependencies=[Depends(rate_limit("login", 10, 60))])
 def login(body: LoginRequest) -> dict:
     email = body.email.strip().lower()
     user = M.query_one("SELECT * FROM users WHERE email=%s", (email,))
     # Same error for unknown email and wrong password — don't leak which.
-    if not user or not user.get("password_hash") or not verify_password(body.password, user["password_hash"]):
+    if (
+        not user
+        or not user.get("password_hash")
+        or not verify_password(body.password, user["password_hash"])
+    ):
         raise HTTPException(401, "Invalid email or password")
     return {"token": mint_token(user["id"]), "user": _public_user(user)}
 

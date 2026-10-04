@@ -14,6 +14,7 @@ If it fails, the per-feature contribution table below shows which columns to dro
 
     python scripts/gate2_crypto_features_ablation.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,12 +25,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sklearn.metrics import roc_auc_score                          # noqa: E402
+from sklearn.metrics import roc_auc_score  # noqa: E402
 
 
 def _crypto_subset_auc(X, y, t1, w, feat_cols, crypto_mask):
     """Pooled OOF (train on everything) → AUC measured on the crypto rows only."""
     from backend.prediction.train import evaluate_oof
+
     r = evaluate_oof(X, y, w, t1, feat_cols)
     oof_full, tested = r["_oof_p_full"], r["_mask"]
     m = tested & crypto_mask
@@ -37,21 +39,23 @@ def _crypto_subset_auc(X, y, t1, w, feat_cols, crypto_mask):
 
 
 async def _main():
-    from backend.prediction.train import load_dataset
     from backend.prediction.crypto_features import CRYPTO_FEATURE_COLS
     from backend.prediction.datasources import CRYPTO_SYMBOLS
+    from backend.prediction.train import load_dataset
 
     X, y, w, t1, feat_cols, _fd, data = await load_dataset()
     crypto_cols = [c for c in CRYPTO_FEATURE_COLS if c in feat_cols]
     price_cols = [c for c in feat_cols if c not in CRYPTO_FEATURE_COLS]
     crypto_mask = data["_sym"].isin(CRYPTO_SYMBOLS).values
 
-    print(f"Sample: {len(X):,} events ({crypto_mask.sum():,} crypto / {(~crypto_mask).sum():,} equity)")
+    print(
+        f"Sample: {len(X):,} events ({crypto_mask.sum():,} crypto / {(~crypto_mask).sum():,} equity)"
+    )
     print(f"Features: {len(feat_cols)} total = {len(price_cols)} base + {len(crypto_cols)} crypto")
     print(f"Crypto columns: {crypto_cols}\n")
 
     auc_w, n_c, full_w = _crypto_subset_auc(X, y, t1, w, feat_cols, crypto_mask)
-    auc_o, _,  full_o = _crypto_subset_auc(X, y, t1, w, price_cols, crypto_mask)
+    auc_o, _, full_o = _crypto_subset_auc(X, y, t1, w, price_cols, crypto_mask)
     delta = auc_w - auc_o
 
     print("=" * 66)
@@ -64,8 +68,10 @@ async def _main():
     print(f"  {'delta (crypto)':18}{delta:>+12.4f}")
     print("-" * 66)
     passed = delta >= 0.01
-    print(f"  GATE-2 (>= +0.0100 on crypto subset): "
-          f"{'PASS' if passed else 'FAIL'}  (delta {delta:+.4f}, target AUC>=0.55 -> {auc_w:.4f})")
+    print(
+        f"  GATE-2 (>= +0.0100 on crypto subset): "
+        f"{'PASS' if passed else 'FAIL'}  (delta {delta:+.4f}, target AUC>=0.55 -> {auc_w:.4f})"
+    )
 
     # Per-feature leave-one-IN contribution: AUC(base + this one column) - AUC(base). Identifies the
     # weakest features to drop if the gate is borderline/failing.
