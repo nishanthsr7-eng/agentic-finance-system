@@ -308,6 +308,24 @@
            'flux_reward_states', 'flux_seeded'].forEach(k => localStorage.removeItem(k));
           localStorage.setItem('flux_token', data.token);
           if (data.user) localStorage.setItem('flux_user', JSON.stringify(data.user));
+          // Fetch the dashboard's data now, while the button still says
+          // "Logging in…", so the dashboard opens filled in. Capped at 5 s;
+          // on any failure the dashboard just fetches it itself.
+          clearTimeout(slow);
+          btn.textContent = 'Loading your data…';
+          try {
+            const ctl = new AbortController();
+            const cap = setTimeout(() => ctl.abort(), 5000);
+            const r = await fetch(API + '/db/bootstrap', {
+              headers: { 'Authorization': 'Bearer ' + data.token },
+              signal: ctl.signal,
+            });
+            clearTimeout(cap);
+            if (r.ok) {
+              sessionStorage.setItem('flux_bootstrap',
+                JSON.stringify({ at: Date.now(), data: await r.json() }));
+            }
+          } catch (_) { /* dashboard falls back to its own fetch */ }
           window.location.href = 'dashboard.html';
         } catch (err) {
           clearTimeout(slow);

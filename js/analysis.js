@@ -356,18 +356,17 @@
         days.push({ date, total });
       }
 
-      const maxDay = Math.max(...days.map(d => d.total), 1);
+      // Log scale in 5 steps (GitHub-style): one rent or SIP day would
+      // otherwise set the maximum and wash every ordinary day out to grey.
+      const maxLog = Math.log1p(Math.max(...days.map(d => d.total), 1));
+      const STEPS = ['rgba(255,255,255,.04)', 'rgba(0,229,160,.18)', 'rgba(0,229,160,.36)',
+                     'rgba(0,229,160,.6)', 'rgba(0,229,160,.9)'];
       days.forEach(({ date, total }) => {
-        const intensity = total / maxDay;
-        const alpha = 0.05 + intensity * 0.85;
-        const col = intensity > 0.7
-          ? `rgba(0,229,160,${alpha.toFixed(2)})`
-          : intensity > 0.3
-            ? `rgba(0,229,160,${(alpha * 0.5).toFixed(2)})`
-            : `rgba(255,255,255,.04)`;
+        const level = total > 0 ? Math.max(1, Math.ceil((Math.log1p(total) / maxLog) * 4)) : 0;
+        const col = STEPS[level];
         const dateStr = date.toLocaleString('default', { month: 'short', day: 'numeric' });
         const srLabel = `${dateStr}: ${total > 0 ? '₹' + total.toLocaleString('en-IN') + ' spent' : 'no spend'}`;
-        html += `<div class="hm-cell" role="img" aria-label="${srLabel}" style="background:${col};aspect-ratio:1/1;border-radius:4px;" data-tx='${JSON.stringify({ d: dateStr, t: total })}'></div>`;
+        html += `<div class="hm-cell" role="img" aria-label="${srLabel}" style="background:${col};" data-tx='${JSON.stringify({ d: dateStr, t: total })}'></div>`;
       });
 
       el.innerHTML = html;
@@ -403,8 +402,8 @@
     /* ══════════════════════════════════════════════
        4. KINETIC TICKER FEED — real transactions
     ══════════════════════════════════════════════ */
-    // Live Ledger now shows the BUY/SELL trade book for stocks available in the
-    // marketplace (served from MySQL via /db/trades). Fetched once and cached.
+    // Live Ledger shows the BUY/SELL paper-trade book, stocks and crypto
+    // (served from MySQL via /db/trades). Fetched once and cached.
     let LEDGER_TRADES = null;
     let tickerObserver = null;
 
@@ -435,10 +434,12 @@
         cards = trades.slice(0, 100).map(t => {
           const ccy = CCY_SYMBOL[t.currency] || '$';
           const qty = Number(t.quantity);
+          const crypto = t.asset_type === 'crypto';
+          const sym = String(t.symbol).replace(/^BINANCE:|USDT$/g, '');
           return {
             side:  t.side,                                  // BUY | SELL
-            asset: `${t.symbol} · ${t.name}`,
-            qty:   `${qty % 1 === 0 ? qty : qty.toFixed(2)} sh @ ${ccy}${Number(t.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+            asset: `${sym} · ${t.name}`,
+            qty:   `${crypto ? qty.toFixed(6).replace(/0+$/, '') : (qty % 1 === 0 ? qty : qty.toFixed(2)) + ' sh'} @ ${ccy}${Number(t.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
             ccy,
             val:   Number(t.amount).toLocaleString('en-US', { maximumFractionDigits: 2 }),
             time:  new Date(t.trade_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
@@ -455,7 +456,7 @@
             : `${trades.length} TRADES`) + ccyNote;
         }
       } else {
-        cards = [{ side: 'BUY', asset: 'No trades yet — trade stocks in the Marketplace', qty: '—', ccy: '$', val: '0', time: '—' }];
+        cards = [{ side: 'BUY', asset: 'No trades yet — place one in the Marketplace', qty: '—', ccy: '$', val: '0', time: '—' }];
         if (countEl) countEl.textContent = '—';
       }
 
@@ -1114,7 +1115,10 @@
         </div>`;
     }
 
-    async function runBacktest() {
+    // quiet: a failure leaves the empty state alone (demo auto-run retries).
+    // Resolves true when results were rendered.
+    async function runBacktest(_evt, quiet = false) {
+      let ok = false;
       const btn     = document.getElementById('bt-run-btn');
       const symbol  = document.getElementById('bt-symbol').value;
       const start   = document.getElementById('bt-start').value;
@@ -1187,8 +1191,10 @@
         const btCcy = document.getElementById('bt-currency-label')?.textContent || '₹';
         renderBtMetrics(data.metrics, data.final_value, data.initial_capital, btCcy);
         renderBtEquityCurve(data.equity_curve, data.initial_capital, btCcy);
+        ok = true;
 
       } catch (e) {
+        if (quiet) return false;
         // Translate raw failures (HTTP status codes, fetch TypeErrors) into
         // something a user can act on; e.message is escaped before injection.
         let msg = String(e.message || 'Unknown error');
@@ -1207,6 +1213,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Run Backtest`;
       }
+      return ok;
     }
 
     /* ══════════════════════════════════════════════
@@ -1267,6 +1274,18 @@
       const btStartInput = document.getElementById('bt-start');
       if (btStartInput) btStartInput.max = today;
       document.getElementById('bt-run-btn')?.addEventListener('click', runBacktest);
+      // Demo account: show a finished run (the form's defaults, BTC SMA 20/50
+      // since 2023) instead of an empty results panel. Cached server-side.
+      try {
+        const u = JSON.parse(localStorage.getItem('flux_user') || 'null');
+        // Started after the page's own market fetches settle: yfinance
+        // downloads that overlap can come back empty. One quiet retry.
+        if (u && u.email === 'nishanth@flux.app') {
+          setTimeout(async () => {
+            if (!(await runBacktest(null, true))) setTimeout(() => runBacktest(null, true), 6000);
+          }, 4000);
+        }
+      } catch (_) { /* no session data → leave the panel empty */ }
       // Every backtest symbol is USD-quoted.
       const btCurrLabel = document.getElementById('bt-currency-label');
       if (btCurrLabel) btCurrLabel.textContent = '$';

@@ -11,6 +11,7 @@
  */
 (function () {
   const PROFILE_KEY = 'flux_profile';
+  const DEMO_EMAIL = 'nishanth@flux.app'; // public demo login (pages/login.html)
 
   /* ───────────── helpers ───────────── */
   const $ = (id) => document.getElementById(id);
@@ -275,6 +276,14 @@
     }
     const settingsNav = $('settingsNav');
     if (settingsNav) settingsNav.addEventListener('click', (e) => { e.preventDefault(); openSetup(false); });
+
+    // The shared demo account is already seeded: give it a profile instead of
+    // asking every visitor to fill in the onboarding form.
+    const user = readJSON('flux_user', null);
+    if (!getProfile() && user && user.email === DEMO_EMAIL) {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({ name: user.name || 'Demo', currency: 'INR' }));
+      applyProfile();
+    }
 
     // First visit → mandatory onboarding (after the splash clears)
     if (!getProfile()) {

@@ -228,7 +228,8 @@ CI runs these on Python 3.10 and 3.12 on every push and pull request.
 ├── css/                    # Design-token-based stylesheets
 ├── js/                     # Frontend JavaScript modules
 ├── backend/                # FastAPI application
-│   ├── main.py             # API routes + app wiring
+│   ├── main.py             # App wiring, lifespan, /health
+│   ├── routes/             # market, predict, ingestion, ai, backtest routers
 │   ├── ingestion.py        # APScheduler ingestion jobs
 │   ├── insights.py         # LLM market-insight generation
 │   ├── rag.py              # ChromaDB embedding + retrieval

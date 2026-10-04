@@ -42,13 +42,14 @@ system.
 
 `backend/main.py` wires the application:
 
-- **Routers** — market data and predictions (main), seeded dataset
+- **Routers** — `backend/routes/` (market data, predictions, ingestion,
+  AI, backtest), seeded dataset
   (`user_api.py`), paper trading (`trading_api.py`), payments
   (`payments_api.py`), and auth (`auth.py`).
 - **Middleware** — strict CORS allow-list and security headers
   (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
   `Cache-Control`) on every response.
-- **Lifecycle** — on startup it ensures all schemas, initialises SQLite and
+- **Lifecycle** — a `lifespan` handler: on startup it ensures all schemas, initialises SQLite and
   ChromaDB, and starts the APScheduler jobs; on shutdown it stops the scheduler
   and closes HTTP clients.
 - **Caching** — a small in-memory TTL cache (`cache.py`) fronts every upstream
