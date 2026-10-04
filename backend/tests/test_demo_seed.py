@@ -177,3 +177,15 @@ def test_reseed_at_0535_ist_still_has_a_row_today():
     rows = S.build_demo_rows(TODAY, early, _closes())["transactions"]
     assert max(t[2] for t in rows).startswith("2027-01-15")
     assert all(t[2] <= "2027-01-15 05:35:00" for t in rows)
+
+
+def test_every_recent_day_has_spending():
+    # The Analysis cashflow heatmap covers 30 days; none should be empty.
+    for today in (TODAY, date(2026, 10, 4), date(2026, 3, 1)):
+        now = datetime(today.year, today.month, today.day, 18, 0)
+        rows = S.build_transactions(today, now)
+        spent = {r[0].date() for r in rows if r[2] < 0}
+        missing = [
+            today - timedelta(days=k) for k in range(30) if today - timedelta(days=k) not in spent
+        ]
+        assert missing == []

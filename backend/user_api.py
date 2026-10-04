@@ -22,6 +22,7 @@ Routes
   GET /db/contacts               — payee contacts
   GET /db/rewards                — rewards / streaks
   GET /db/security               — settings + devices + events
+  GET /db/bootstrap              — all of the above user data in one call (page-load hydration)
   GET /db/faqs                   — FAQ entries (?category)
   GET /db/careers                — open job postings
   GET /db/team                   — team members
@@ -88,11 +89,28 @@ def get_user(user_id: int = Depends(require_user)) -> dict:
     return {"user": row}
 
 
-@db_router.get("/accounts")
-def get_accounts(user_id: int = Depends(require_user)) -> dict:
+class _Conn:
+    """query/query_one over one open connection, so a request that needs
+    several result sets pays for a single TiDB connect + TLS handshake."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def query(self, sql: str, params: tuple | None = None) -> list[dict]:
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchall()
+
+    def query_one(self, sql: str, params: tuple | None = None) -> dict | None:
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchone()
+
+
+def _accounts(db, user_id: int) -> dict:
     # Never ship unmasked card numbers / expiry dates to the client.
     # credit_limit comes from migrations/005_accounts_credit_limit.py.
-    rows = M.query(
+    rows = db.query(
         "SELECT id, user_id, name, acct_type, balance, "
         "COALESCE(credit_limit, 0) AS credit_limit, active, card_masked, "
         "expiry_masked, sort_order FROM accounts WHERE user_id=%s ORDER BY sort_order",
@@ -101,24 +119,71 @@ def get_accounts(user_id: int = Depends(require_user)) -> dict:
     return {"accounts": rows}
 
 
+def _transactions(db, user_id: int, limit: int, category: str | None = None) -> dict:
+    if category:
+        rows = db.query(
+            "SELECT * FROM transactions WHERE user_id=%s AND category=%s "
+            "ORDER BY tx_date DESC LIMIT %s",
+            (user_id, category, limit),
+        )
+    else:
+        rows = db.query(
+            "SELECT * FROM transactions WHERE user_id=%s ORDER BY tx_date DESC LIMIT %s",
+            (user_id, limit),
+        )
+    return {"transactions": rows, "count": len(rows)}
+
+
+def _portfolio(db, user_id: int) -> dict:
+    alloc = db.query_one("SELECT * FROM portfolio WHERE user_id=%s", (user_id,))
+    holdings = db.query("SELECT * FROM portfolio_holdings WHERE user_id=%s", (user_id,))
+    return {"allocation": alloc, "holdings": holdings}
+
+
+def _recurring(db, user_id: int) -> dict:
+    rows = db.query(
+        "SELECT * FROM recurring_payments WHERE user_id=%s ORDER BY due_day", (user_id,)
+    )
+    return {"recurring": rows}
+
+
+def _contacts(db, user_id: int) -> dict:
+    rows = db.query(
+        "SELECT * FROM contacts WHERE user_id=%s ORDER BY favorite DESC, name", (user_id,)
+    )
+    return {"contacts": rows}
+
+
+def _rewards(db, user_id: int) -> dict:
+    rows = db.query("SELECT * FROM rewards WHERE user_id=%s", (user_id,))
+    return {"rewards": rows}
+
+
+def _security(db, user_id: int) -> dict:
+    settings = db.query(
+        "SELECT * FROM security_settings WHERE user_id=%s ORDER BY sort_order", (user_id,)
+    )
+    devices = db.query(
+        "SELECT * FROM devices WHERE user_id=%s ORDER BY last_active DESC", (user_id,)
+    )
+    events = db.query(
+        "SELECT * FROM security_events WHERE user_id=%s ORDER BY event_at DESC", (user_id,)
+    )
+    return {"settings": settings, "devices": devices, "events": events}
+
+
+@db_router.get("/accounts")
+def get_accounts(user_id: int = Depends(require_user)) -> dict:
+    return _accounts(M, user_id)
+
+
 @db_router.get("/transactions")
 def get_transactions(
     user_id: int = Depends(require_user),
     limit: int = Query(500, le=2000),
     category: str | None = None,
 ) -> dict:
-    if category:
-        rows = M.query(
-            "SELECT * FROM transactions WHERE user_id=%s AND category=%s "
-            "ORDER BY tx_date DESC LIMIT %s",
-            (user_id, category, limit),
-        )
-    else:
-        rows = M.query(
-            "SELECT * FROM transactions WHERE user_id=%s ORDER BY tx_date DESC LIMIT %s",
-            (user_id, limit),
-        )
-    return {"transactions": rows, "count": len(rows)}
+    return _transactions(M, user_id, limit, category)
 
 
 @db_router.get("/trades")
@@ -127,14 +192,11 @@ def get_trades(
     limit: int = Query(200, le=1000),
     side: str | None = None,
 ) -> dict:
-    """Stock buy/sell trade history, restricted to symbols present in the
-    marketplace (asset_catalog). Newest first. Optional ?side=BUY|SELL."""
+    """Paper-trade history (stocks and crypto), newest first. Optional
+    ?side=BUY|SELL. (Used to JOIN asset_catalog on category='stocks', but the
+    catalogue holds no stocks, so every trade was filtered out.)"""
     params: list = [user_id]
-    sql = (
-        "SELECT t.* FROM trades t "
-        "JOIN asset_catalog a ON a.symbol = t.symbol AND a.category = 'stocks' "
-        "WHERE t.user_id=%s "
-    )
+    sql = "SELECT t.* FROM trades t WHERE t.user_id=%s "
     if side and side.upper() in ("BUY", "SELL"):
         sql += "AND t.side=%s "
         params.append(side.upper())
@@ -146,43 +208,47 @@ def get_trades(
 
 @db_router.get("/portfolio")
 def get_portfolio(user_id: int = Depends(require_user)) -> dict:
-    alloc = M.query_one("SELECT * FROM portfolio WHERE user_id=%s", (user_id,))
-    holdings = M.query("SELECT * FROM portfolio_holdings WHERE user_id=%s", (user_id,))
-    return {"allocation": alloc, "holdings": holdings}
+    return _portfolio(M, user_id)
 
 
 @db_router.get("/recurring")
 def get_recurring(user_id: int = Depends(require_user)) -> dict:
-    rows = M.query("SELECT * FROM recurring_payments WHERE user_id=%s ORDER BY due_day", (user_id,))
-    return {"recurring": rows}
+    return _recurring(M, user_id)
 
 
 @db_router.get("/contacts")
 def get_contacts(user_id: int = Depends(require_user)) -> dict:
-    rows = M.query(
-        "SELECT * FROM contacts WHERE user_id=%s ORDER BY favorite DESC, name", (user_id,)
-    )
-    return {"contacts": rows}
+    return _contacts(M, user_id)
 
 
 @db_router.get("/rewards")
 def get_rewards(user_id: int = Depends(require_user)) -> dict:
-    rows = M.query("SELECT * FROM rewards WHERE user_id=%s", (user_id,))
-    return {"rewards": rows}
+    return _rewards(M, user_id)
 
 
 @db_router.get("/security")
 def get_security(user_id: int = Depends(require_user)) -> dict:
-    settings = M.query(
-        "SELECT * FROM security_settings WHERE user_id=%s ORDER BY sort_order", (user_id,)
-    )
-    devices = M.query(
-        "SELECT * FROM devices WHERE user_id=%s ORDER BY last_active DESC", (user_id,)
-    )
-    events = M.query(
-        "SELECT * FROM security_events WHERE user_id=%s ORDER BY event_at DESC", (user_id,)
-    )
-    return {"settings": settings, "devices": devices, "events": events}
+    return _security(M, user_id)
+
+
+@db_router.get("/bootstrap")
+def get_bootstrap(
+    user_id: int = Depends(require_user),
+    tx_limit: int = Query(2000, le=2000),
+) -> dict:
+    """Everything the app hydrates on page load, in one request over one
+    connection (replaces 7 parallel /db/* calls, ~10 TiDB connects)."""
+    with M.get_conn() as conn:
+        db = _Conn(conn)
+        return {
+            "transactions": _transactions(db, user_id, tx_limit),
+            "accounts": _accounts(db, user_id),
+            "portfolio": _portfolio(db, user_id),
+            "recurring": _recurring(db, user_id),
+            "contacts": _contacts(db, user_id),
+            "security": _security(db, user_id),
+            "rewards": _rewards(db, user_id),
+        }
 
 
 # ── site content ──────────────────────────────────────────────────────────────

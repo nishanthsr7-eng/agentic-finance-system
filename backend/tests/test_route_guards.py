@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from backend import main
 from backend.auth import mint_token
 from backend.config import settings
+from backend.routes import predict
 
 client = TestClient(main.app)
 
@@ -95,6 +96,6 @@ def test_chat_rejects_oversized_history():
 
 
 def test_forecast_recompute_limited_to_model_symbols():
-    syms = main._model_symbols()
+    syms = predict._model_symbols()
     assert "BTC" in syms and "AAPL" in syms
     assert "NOPE" not in syms

@@ -513,12 +513,13 @@
     /* Heatmap — 10 cols × 3 rows, square cells */
     .heatmap-grid {
       display: grid;
-      grid-template-columns: repeat(10, 1fr);
+      grid-template-columns: repeat(10, minmax(0, 26px));
       grid-auto-rows: auto;
-      gap: 6px;
-      width: 100%;
+      gap: 5px;
+      justify-content: center;
     }
     .hm-cell {
+      aspect-ratio: 1 / 1;
       border-radius: 4px;
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       cursor: crosshair;

@@ -44,6 +44,8 @@
     if (isNaN(d)) return String(s);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
+  // Candle axis label: intraday feeds show the time, daily candles the date.
+  function candleLbl(t) { return state.daily ? fmtDate(t) : fmtTime(t); }
   function fmtTime(t) {
     const d = new Date(t);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -73,7 +75,7 @@
   function syncViewport() {
     const wrap = $('chart-wrap');
     const w = Math.max(wrap.clientWidth || 800, 360);
-    const h = Math.max(wrap.clientHeight || 440, 240);
+    const h = Math.max(wrap.clientHeight || 440, 140);
     chartW = w; chartH = h;
     $('chart-svg').setAttribute('viewBox', `0 0 ${w} ${h}`);
     $('chart-svg').setAttribute('preserveAspectRatio', 'none');
@@ -198,13 +200,13 @@
 
     // ── X labels: first · now · target ──
     const xlbl = (x, t, a) => `<text x="${x.toFixed(1)}" y="${(chartH - 7).toFixed(1)}" fill="rgba(255,255,255,.32)" font-size="8.5" font-family="'JetBrains Mono',monospace" text-anchor="${a}">${t}</text>`;
-    const firstLabel = lineMode ? fmtDate(src[0].date) : fmtTime(candles[0].t);
+    const firstLabel = lineMode ? fmtDate(src[0].date) : candleLbl(candles[0].t);
     out += xlbl(PAD.l, firstLabel, 'start');
     if (hasPred) {
       out += xlbl(xNow, 'NOW', 'middle');
       if (state.prediction.target_date) out += xlbl(xEnd, fmtDate(state.prediction.target_date), 'end');
     } else {
-      const lastLabel = lineMode ? fmtDate(src[src.length - 1].date) : fmtTime(candles[candles.length - 1].t);
+      const lastLabel = lineMode ? fmtDate(src[src.length - 1].date) : candleLbl(candles[candles.length - 1].t);
       out += xlbl(xEnd, lastLabel, 'end');
     }
 
@@ -248,7 +250,7 @@
       const i = Math.max(0, Math.min(g.N - 1, Math.round(frac * (g.N - 1))));
       const d = g.lineMode ? g.src[i] : g.candles[i];
       priceVal = g.lineMode ? d.close : d.c;
-      label = g.lineMode ? fmtDate(d.date) : fmtTime(d.t);
+      label = g.lineMode ? fmtDate(d.date) : candleLbl(d.t);
       dotX = g.PAD.l + (g.N === 1 ? 0 : i / (g.N - 1)) * (g.xNow - g.PAD.l);
     } else {
       // hover over the forecast zone — interpolate along the projection line
@@ -307,10 +309,11 @@
     const pct = (last - first) / first * 100;
     priceEl.textContent = fmtPrice(last);
     const up = pct >= 0;
-    chgEl.textContent = `${up ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% · ${state.tf}`;
+    chgEl.textContent = `${up ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% · ${state.daily || state.lineMode ? src.length + 'D' : state.tf}`;
     chgEl.className = 'cl-chg ' + (up ? 'up' : 'down');
-    dot.className = 'cl-dot ' + (state.live ? 'live' : (state.lineMode ? '' : 'stale'));
-    lbl.textContent = state.live ? 'LIVE' : (state.lineMode ? 'DAILY' : 'STALE');
+    const daily = state.lineMode || state.daily;
+    dot.className = 'cl-dot ' + (state.live ? 'live' : (daily ? '' : 'stale'));
+    lbl.textContent = state.live ? 'LIVE' : (daily ? 'DAILY' : 'STALE');
   }
 
   /* ─────────────── loaders ─────────────── */
@@ -323,6 +326,12 @@
       if (c.length > 1) { state.candles = c; state.live = true; return true; }
       return false;
     } catch (e) { return false; }
+  }
+
+  function dailyCandles() {
+    const s = state.series;
+    if (s.length < 2 || !s.every(p => p.open != null && p.high != null && p.low != null)) return null;
+    return s.map(p => ({ t: new Date(p.date).getTime(), o: p.open, h: p.high, l: p.low, c: p.close }));
   }
 
   async function loadForecast() {
@@ -366,19 +375,22 @@
     if (_loading) return;
     _loading = true;
     if (!quiet) showChartSkeleton();
-    const [okC, okF] = await Promise.all([loadCandles(), loadForecast(), loadVerdict()]);
-    state.lineMode = !okC && state.series.length > 1;
+    const [okC] = await Promise.all([loadCandles(), loadForecast(), loadVerdict()]);
+    // No live candle feed (everything but BTC/ETH): draw daily candles from
+    // the stored history; fall back to a close-price line if OHLC is missing.
+    const daily = okC ? null : dailyCandles();
+    if (daily) state.candles = daily;
+    state.daily = !!daily;
+    state.lineMode = !okC && !daily && state.series.length > 1;
     state.live = okC;
-    if (okC || state.lineMode) {
+    if (okC || daily || state.lineMode) {
       hideChartStatus();
       drawChart();
       updateLiveReadout();
     } else if (!quiet) {
       showChartStatus('No market data for this asset. Is the API running on :8000?', true, true);
     }
-    // notify dependent containers (signal strip, track record, verifier label, chat ctx)
-    renderSignalStrip();
-    if (typeof renderTrust === 'function') renderTrust();
+    renderVerdictCard();
     syncSymbolLabels();
     _loading = false;
   }
@@ -426,7 +438,6 @@
 
   function syncSymbolLabels() {
     const s = state.symbol;
-    if ($('vf-sym')) $('vf-sym').textContent = s;
     if ($('chat-ctx-sym')) $('chat-ctx-sym').textContent = s;
   }
 
@@ -440,123 +451,86 @@
     return state.candles.length ? state.candles[state.candles.length - 1].c : null;
   }
 
-  function renderSignalStrip() {
-    const p = state.prediction;
-    const set = (id, html, cls) => { const el = $(id); if (!el) return; el.innerHTML = html; if (cls != null) el.className = cls; };
+  const REGIME = { trend: 'Trending', chop: 'Sideways' };
+  const _track = {};   // symbol -> { acc, n } past-call hit rate
 
+  async function loadTrack(sym) {
+    if (_track[sym] !== undefined) return;
+    _track[sym] = null;
+    try {
+      const h = await getJSON(`${API}/predict/${sym}/history?limit=100`);
+      const n = (h.history || []).filter(r => r.correct === 0 || r.correct === 1).length;
+      if (h.realized_accuracy != null && n) _track[sym] = { acc: Math.round(h.realized_accuracy * 100), n };
+    } catch (e) { /* no track record line */ }
+    if (sym === state.symbol) renderVerdictCard();
+  }
+
+  // The second check (an LLM reading recent news) as one line: it can only
+  // lower the model's confidence or veto the call, never raise it.
+  function checkLine(v) {
+    if (_verifying) return `<span class="vd-check-txt">Checking against recent news…</span>`;
+    if (!v || !v.label || v.verifier === 'unavailable' || v.verifier === 'parse_error') {
+      return `<span class="vd-check-txt">Not checked against the news yet.</span>`;
+    }
+    const veto = v.label === 'VETO' || v.veto;
+    const agree = !veto && (v.label === 'agree' || v.agree);
+    const [cls, icon, txt] = veto ? ['veto', ICON.veto, 'News check: <b>vetoed</b> this forecast']
+      : agree ? ['agree', ICON.agree, 'News check: <b>agrees</b>']
+      : ['downgrade', ICON.down, `News check: lowered confidence to <b>${v.final_confidence}%</b>`];
+    const why = v.rationale ? ` <span class="vd-why">${escapeHtml(v.rationale)}</span>` : '';
+    const tip = [v.rationale, v.risks && `Main risk: ${v.risks}`].filter(Boolean).join(' — ');
+    return `<span class="vd-check-ic ${cls}">${icon}</span><span class="vd-check-txt" title="${escapeHtml(tip)}">${txt}.${why}</span>`;
+  }
+
+  function renderVerdictCard() {
+    const el = $('verdict');
+    if (!el) return;
+    const p = state.prediction, sym = escapeHtml(state.symbol);
     if (!p) {
-      set('sig-dir', '—', 'sig-val neu');
-      ['sig-conf', 'sig-size', 'sig-regime'].forEach(id => set(id, '—', 'sig-val neu'));
-      set('sig-conf-sub', 'no model signal yet'); set('sig-size-sub', '—'); set('sig-sent', '—');
-      set('sig-asof', '—');
-      renderOutlook();
+      el.innerHTML = `<div class="vd-head"><span class="vd-title">No forecast for ${sym} yet.</span></div>`;
       return;
     }
-
     const anchor = liveAnchor();
     const fc = rebasedForecast(anchor);
     const up = p.direction !== 'DOWN';
-    const col = up ? 'up' : 'down';
+    const days = p.horizon_days || 5;
+    const conf = state.verdict && state.verdict.final_confidence != null && state.verdict.label !== 'agree'
+      ? state.verdict.final_confidence : p.confidence;
 
-    // Direction
-    set('sig-dir', `<span class="sig-badge ${col}">${up ? '▲' : '▼'} ${p.direction || (up ? 'UP' : 'DOWN')}</span>`, 'sig-val');
-
-    // Verifier verdict tag (from the daily prediction cycle, if logged) + as-of stamp
-    const v = state.verdict;
-    let vfTag = '';
-    if (v && v.label) {
-      const vcls = v.label === 'VETO' ? 'veto' : (v.label === 'downgrade' ? 'downgrade' : 'agree');
-      const vtxt = v.label === 'VETO' ? `veto → ${v.final_confidence}%`
-        : v.label === 'downgrade' ? `↓ verifier ${v.final_confidence}%`
-        : '✓ verifier agrees';
-      vfTag = `<span class="sig-vf-tag ${vcls}" title="${escapeHtml(v.rationale || '')}">${vtxt}</span>`;
-    }
-    const asOf = p.generated_at ? `as of ${fmtDate(p.generated_at)} ${fmtTime(p.generated_at)}` : '—';
-    set('sig-asof', vfTag + asOf);
-
-    // Confidence (calibrated). Note base→calibrated downgrade if present.
-    set('sig-conf', `${p.confidence != null ? p.confidence : '—'}%`, 'sig-val');
-    const baseNote = (p.base_confidence != null && p.base_confidence !== p.confidence)
-      ? `base ${p.base_confidence}% → calibrated` : 'calibrated';
-    set('sig-conf-sub', baseNote);
-
-    renderOutlook();
-
-    // Position size — honest about the meta act-gate.
-    if (p.act) {
-      set('sig-size', (p.kelly_frac != null ? (p.kelly_frac * 100).toFixed(1) + '%' : '—'), 'sig-val');
-      set('sig-size-sub', 'Kelly stake');
-    } else {
-      set('sig-size', 'No-trade', 'sig-val neu');
-      set('sig-size-sub', 'below act gate');
+    const range = fc && p.conf_low != null
+      ? `Likely between <b>${fmtPrice(fc.bandLow)}</b> and <b>${fmtPrice(fc.bandHigh)}</b> by ${fmtDate(p.target_date)}`
+      : '';
+    let bar = '';
+    if (fc && anchor && fc.bandHigh > fc.bandLow) {
+      const pad = (fc.bandHigh - fc.bandLow) * 0.25, lo = fc.bandLow - pad, span = fc.bandHigh + pad - lo;
+      const pos = v => Math.max(0, Math.min(100, (v - lo) / span * 100)).toFixed(1);
+      bar = `<div class="vd-bar"><span class="vd-bar-in" style="left:${pos(fc.bandLow)}%;right:${(100 - pos(fc.bandHigh)).toFixed(1)}%"></span><span class="vd-bar-now" style="left:${pos(anchor)}%" title="Now ${fmtPrice(anchor)}"></span></div>`;
     }
 
-    // Regime + sentiment
-    set('sig-regime', p.regime || '—', 'sig-val');
-    const sl = p.sentiment_label || (p.sentiment != null ? (p.sentiment >= 0 ? 'positive' : 'negative') : null);
-    const ss = p.sentiment != null ? ` ${p.sentiment >= 0 ? '+' : ''}${p.sentiment.toFixed(2)}` : '';
-    set('sig-sent', sl ? `${sl}${ss}` : '—');
-  }
+    const vetoed = !!(state.verdict && state.verdict.label === 'VETO');
+    const size = vetoed ? 'Stay out (vetoed by news check)'
+      : p.act && p.kelly_frac != null ? `${(p.kelly_frac * 100).toFixed(1)}% of portfolio`
+      : 'Stay out (signal too weak)';
+    const t = _track[state.symbol];
+    const facts = [
+      ['Suggested size', size],
+      ['Market', REGIME[p.regime] || (p.regime ? p.regime[0].toUpperCase() + p.regime.slice(1) : '—')],
+      ['Track record', t ? `Right ${t.acc}% of ${t.n} past calls` : 'Not enough past calls yet'],
+    ];
 
-  /* ══════════════════════════════════════════════════════════════
-     5-DAY OUTLOOK — the calibrated price range, re-based to live.
-     The range is the headline: its coverage is measured (80% / 90%
-     out of fold). The central estimate is shown muted, with its
-     average miss, until a retrain beats "no change".
-     ══════════════════════════════════════════════════════════════ */
-  function renderOutlook() {
-    const body = $('ol-body'), meta = $('ol-meta');
-    if (!body) return;
-    const p = state.prediction;
-    const anchor = liveAnchor();
-    const fc = p ? rebasedForecast(anchor) : null;
-    if ($('ol-h')) $('ol-h').textContent = p ? (p.horizon_days || 5) : 5;
-    if (!p || !fc || p.conf_low == null || p.conf_high == null) {
-      body.innerHTML = `<div class="ol-note">No price range for ${escapeHtml(state.symbol)} yet.</div>`;
-      if (meta) meta.textContent = '—';
-      return;
-    }
-    const pct = p.band_pct || 80;
-    const chg = v => fmtPct((v / anchor - 1) * 100, 1);
-    const skill = pointHasSkill();
-    const pf = state.pointForecast || {};
-    const miss = pf.mae != null ? `avg miss ±${(pf.mae * 100).toFixed(1)}%` : '';
-    if (meta) meta.textContent = `${pct}% range · by ${fmtDate(p.target_date)}`;
-
-    const has90 = fc.band90Low != null;
-    let html = `<div class="ol-levels">
-      <div class="ol-lvl">
-        <span class="ol-lvl-lbl">Low</span>
-        <span class="ol-lvl-val">${fmtPrice(fc.bandLow)}<small>${chg(fc.bandLow)}</small></span>
-        ${has90 ? `<span class="ol-lvl-sub">90%: ${fmtPrice(fc.band90Low)} (${chg(fc.band90Low)})</span>` : ''}
+    el.innerHTML = `
+      <div class="vd-head">
+        <span class="vd-dir ${up ? 'up' : 'down'}">${up ? ICON.up : ICON.dn}</span>
+        <span class="vd-title">${vetoed
+          ? `${sym}: model says <b class="${up ? 'up' : 'down'}">${up ? 'up' : 'down'}</b>, but the news check vetoed it`
+          : `${sym} likely <b class="${up ? 'up' : 'down'}">${up ? 'up' : 'down'}</b> over the next ${days} days`}</span>
+        <span class="vd-conf">${conf}% confidence</span>
       </div>
-      <div class="ol-lvl${skill ? '' : ' muted'}">
-        <span class="ol-lvl-lbl">Central estimate</span>
-        <span class="ol-lvl-val">${fmtPrice(fc.projected)}<small>${chg(fc.projected)}</small></span>
-        <span class="ol-lvl-sub">${skill ? miss : `not better than no-change${miss ? ' · ' + miss : ''}`}</span>
-      </div>
-      <div class="ol-lvl">
-        <span class="ol-lvl-lbl">High</span>
-        <span class="ol-lvl-val">${fmtPrice(fc.bandHigh)}<small>${chg(fc.bandHigh)}</small></span>
-        ${has90 ? `<span class="ol-lvl-sub">90%: ${fmtPrice(fc.band90High)} (${chg(fc.band90High)})</span>` : ''}
-      </div>
-    </div>`;
-
-    // Bar: the track spans the 90% range (or the 80% one padded), the inner block is the
-    // 80% range, the tick is the live price.
-    const lo = has90 ? fc.band90Low : fc.bandLow - (fc.bandHigh - fc.bandLow) * 0.15;
-    const hi = has90 ? fc.band90High : fc.bandHigh + (fc.bandHigh - fc.bandLow) * 0.15;
-    const span = hi - lo;
-    if (span > 0) {
-      const pos = v => Math.max(0, Math.min(100, (v - lo) / span * 100));
-      html += `<div class="ol-bar" title="${pct}% range (inner) within the 90% range (track); tick = live price">
-        <span class="ol-bar-80" style="left:${pos(fc.bandLow).toFixed(1)}%;right:${(100 - pos(fc.bandHigh)).toFixed(1)}%"></span>
-        <span class="ol-bar-now" style="left:${pos(anchor).toFixed(1)}%"></span>
-      </div>
-      <div class="ol-bar-ends"><span>${has90 ? '90% low' : ''}</span><span>live ${fmtPrice(anchor)}</span><span>${has90 ? '90% high' : ''}</span></div>`;
-    }
-    html += `<div class="ol-note">In ${pct}% of past cases, the price ${p.horizon_days || 5} trading days later was inside this range. That rate is an average over all predictions, not a promise for this one.</div>`;
-    body.innerHTML = html;
+      ${range ? `<div class="vd-range">${range}</div>${bar}` : ''}
+      <div class="vd-facts">${facts.map(([k, v]) => `<div class="vd-fact"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+      <div class="vd-check">${checkLine(state.verdict)}<button class="mini-btn" id="vf-btn"${_verifying ? ' disabled' : ''}>Check now</button></div>`;
+    $('vf-btn').addEventListener('click', runVerifier);
+    loadTrack(state.symbol);
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -564,6 +538,15 @@
      The agent's highest-conviction calls across every symbol it
      covers. Click a row to load it into the chart.
      ══════════════════════════════════════════════════════════════ */
+  // Plain stroked line icons (inherit colour from the badge class).
+  const svg = (d) => `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICON = {
+    up:    svg('<polyline points="6 15 12 9 18 15"/>'),
+    dn:    svg('<polyline points="6 9 12 15 18 9"/>'),
+    veto:  svg('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>'),
+    down:  svg('<line x1="12" y1="5" x2="12" y2="19"/><polyline points="6 13 12 19 18 13"/>'),
+    agree: svg('<polyline points="5 12 10 17 19 7"/>'),
+  };
   let _leaderboard = [];
   let _verdicts = {}; // symbol -> latest verifier verdict (for VETO/downgrade badges)
 
@@ -572,18 +555,17 @@
     if (!_leaderboard.length) { body.innerHTML = `<div class="mini-empty">No agent calls logged yet.<br>Trigger predictions on the API to populate.</div>`; return; }
     body.innerHTML = _leaderboard.map((r, i) => {
       const up = r.direction !== 'DOWN';
-      const col = up ? UP : DOWN;
       const conf = r.confidence != null ? r.confidence : 0;
       const chartable = !!CHARTABLE[r.symbol];
       const v = _verdicts[r.symbol];
       let badge = '<span class="lb-verdict"></span>';
-      if (v && v.label === 'VETO') badge = `<span class="lb-verdict veto" title="Verifier VETO → ${v.final_confidence}%: ${escapeHtml(v.rationale || '')}">⛔</span>`;
-      else if (v && v.label === 'downgrade') badge = `<span class="lb-verdict downgrade" title="Verifier downgraded → ${v.final_confidence}%: ${escapeHtml(v.rationale || '')}">↓</span>`;
+      if (v && v.label === 'VETO') badge = `<span class="lb-verdict veto" title="News check vetoed this (confidence → ${v.final_confidence}%): ${escapeHtml(v.rationale || '')}">${ICON.veto}</span>`;
+      else if (v && v.label === 'downgrade') badge = `<span class="lb-verdict downgrade" title="News check lowered confidence to ${v.final_confidence}%: ${escapeHtml(v.rationale || '')}">${ICON.down}</span>`;
       return `<div class="lb-row${r.symbol === state.symbol ? ' active' : ''}" data-sym="${r.symbol}" title="${chartable ? 'Live chart' : 'Forecast (no live candles)'}">
         <span class="lb-rank">${i + 1}</span>
         <span class="lb-sym">${r.symbol}</span>
-        <span class="lb-dir" style="color:${col}">${up ? '▲' : '▼'}</span>
-        <span class="lb-bar-wrap"><span class="lb-bar" style="width:${conf}%;background:${col}"></span></span>
+        <span class="lb-dir${up ? '' : ' down'}">${up ? ICON.up : ICON.dn}</span>
+        <span class="lb-bar-wrap"><span class="lb-bar" style="width:${conf}%"></span></span>
         <span class="lb-conf">${conf}%</span>
         ${badge}
       </div>`;
@@ -613,150 +595,31 @@
     } catch (e) { _verdicts = {}; }
     renderLeaderboard();
   }
-  /* ══════════════════════════════════════════════════════════════
-     CONTAINER 4 — VERIFIER (2nd opinion)
-     On-demand LLM risk-manager: red-teams the model's call against
-     fresh news/RAG. Can only DOWNGRADE or VETO — never raise.
-     ══════════════════════════════════════════════════════════════ */
+  /* ── News check, on demand: re-runs the LLM verifier for the active symbol ── */
   let _verifying = false;
 
   async function runVerifier() {
     if (_verifying) return;
-    const sym = state.symbol;
-    const btn = $('vf-btn'), body = $('vf-body');
-    _verifying = true; btn.disabled = true; btn.textContent = '…';
-    body.innerHTML = `<div class="mini-empty">Red-teaming <b>${sym}</b> against news &amp; context… <br>(LLM verifier, ~20s)</div>`;
+    _verifying = true;
+    renderVerdictCard();
     try {
       const ctrl = new AbortController();
       const to = setTimeout(() => ctrl.abort(), 60000);
-      const r = await fetch(`${API}/predict/${sym}/verify`, { method: 'POST', signal: ctrl.signal });
+      const r = await fetch(`${API}/predict/${state.symbol}/verify`, { method: 'POST', signal: ctrl.signal });
       clearTimeout(to);
       if (!r.ok) throw new Error(r.status);
       const d = await r.json();
-      renderVerdict(d.verdict || d, sym);
-    } catch (e) {
-      body.innerHTML = `<div class="mini-empty">Verifier offline — needs Ollama running.<br><code>ollama serve</code></div>`;
-    } finally {
-      _verifying = false; btn.disabled = false; btn.textContent = 'Run';
-    }
-  }
-
-  function renderVerdict(v, sym) {
-    const body = $('vf-body');
-    if (!v) { body.innerHTML = `<div class="mini-empty">No prediction to verify for ${sym}.</div>`; return; }
-
-    if (v.verifier === 'unavailable' || v.verifier === 'parse_error') {
-      body.innerHTML = `<div class="vf-verdict">
-        <div class="vf-top"><span class="vf-stamp downgrade">Unavailable</span>
-          <span class="vf-conf">model held at <b>${v.model_confidence ?? '—'}%</b></span></div>
-        <div class="vf-text">The LLM verifier ${v.verifier === 'unavailable' ? 'is offline' : 'returned unparseable output'}; the calibrated model signal stands unchanged.</div>
-      </div>`;
-      return;
-    }
-
-    const veto = !!v.veto;
-    const agree = !!v.agree && !veto;
-    const stampCls = veto ? 'veto' : (agree ? 'agree' : 'downgrade');
-    const stampTxt = veto ? 'VETO' : (agree ? 'Agree' : 'Downgrade');
-    const mc = v.model_confidence ?? v.confidence ?? '—';
-    const fc = v.final_confidence ?? mc;
-    const changed = fc !== mc;
-
-    body.innerHTML = `<div class="vf-verdict">
-      <div class="vf-top">
-        <span class="vf-stamp ${stampCls}">${stampTxt}</span>
-        <span class="vf-conf">${sym} · <b>${mc}%</b>${changed ? `<span class="arrow">→</span><b>${fc}%</b>` : ''}</span>
-      </div>
-      ${v.rationale ? `<div class="vf-text">${escapeHtml(v.rationale)}</div>` : ''}
-      ${v.risks ? `<div class="vf-risk"><b>Top risk:</b> ${escapeHtml(v.risks)}</div>` : ''}
-    </div>`;
+      const v = d.verdict || d;
+      if (v && v.verifier !== 'unavailable' && v.verifier !== 'parse_error') state.verdict = v;
+    } catch (e) { /* keep the last stored verdict */ }
+    _verifying = false;
+    renderVerdictCard();
   }
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  function initVerifier() {
-    $('vf-btn').addEventListener('click', runVerifier);
-  }
-  /* ══════════════════════════════════════════════════════════════
-     CONTAINER 5 — MODEL TRUST & TRACK RECORD
-     Global calibration (reliability curve) when data exists, else an
-     honest "accumulating" state. Plus the active symbol's resolved
-     win/loss timeline — never a fabricated curve.
-     ══════════════════════════════════════════════════════════════ */
-  let _calib = [];
-
-  function calibSvg(buckets) {
-    // Reliability curve: stated confidence (x) vs realized hit-rate (y), with the
-    // perfect-calibration diagonal for reference.
-    const W = 240, H = 80, p = 10;
-    const sx = v => p + (v / 100) * (W - 2 * p);
-    const sy = v => (H - p) - (v / 100) * (H - 2 * p);
-    let s = `<svg class="calib-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
-    s += `<line x1="${sx(0)}" y1="${sy(0)}" x2="${sx(100)}" y2="${sy(100)}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="3 3"/>`;
-    const pts = buckets.filter(b => b.n > 0).map(b => [sx(b.stated_conf), sy(b.realized_hit * 100)]);
-    if (pts.length > 1) {
-      s += `<polyline points="${pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="${UP}" stroke-width="2" stroke-linejoin="round"/>`;
-    }
-    pts.forEach(pt => { s += `<circle cx="${pt[0].toFixed(1)}" cy="${pt[1].toFixed(1)}" r="2.6" fill="${UP}"/>`; });
-    s += `</svg>`;
-    return s;
-  }
-
-  async function renderTrust() {
-    const body = $('trust-body');
-    const sym = state.symbol;
-    let hist = null;
-    try { hist = await getJSON(`${API}/predict/${sym}/history?limit=100`); } catch (e) { hist = null; }
-
-    const rows = (hist && hist.history) || [];
-    const resolved = rows.filter(r => r.correct !== null && r.correct !== undefined);
-    const acc = hist && hist.realized_accuracy != null ? Math.round(hist.realized_accuracy * 100) : null;
-
-    // Header number = realized hit-rate for this symbol (honest — '—' until resolved).
-    let html = `<div class="trust-acc">
-      <span class="trust-acc-val">${acc != null ? acc + '%' : '—'}</span>
-      <span class="trust-acc-lbl">${sym} hit rate</span>
-    </div>`;
-    const bandHit = hist && hist.band_hit_rate != null ? Math.round(hist.band_hit_rate * 100) : null;
-    html += `<div class="trust-note">Range hit rate: ${bandHit != null
-      ? `<b style="color:var(--T1)">${bandHit}%</b> over the last ${hist.band_resolved} prediction${hist.band_resolved === 1 ? '' : 's'} (target ${state.prediction ? state.prediction.band_pct || 80 : 80}%)`
-      : 'pending, needs matured predictions'}</div>`;
-    html += `<div class="trust-note">${rows.length} call${rows.length === 1 ? '' : 's'} logged · <b style="color:var(--T1)">${resolved.length}</b> resolved${acc == null ? ' — accuracy pending' : ''}</div>`;
-
-    // Global calibration: real curve if we have data, else honest accumulating note.
-    if (_calib && _calib.some(b => b.n > 0)) {
-      html += `<div class="trust-note" style="margin-bottom:4px;">Model reliability — stated vs realized</div>` + calibSvg(_calib);
-    } else {
-      html += `<div class="trust-note">Calibration curve is still accumulating: it needs predictions whose ${state.prediction ? (state.prediction.horizon_days || 5) : 5}-day horizon has matured and resolved.</div>`;
-    }
-
-    // Track strip — recent calls as win / loss / pending cells (newest last).
-    if (rows.length) {
-      const cells = rows.slice(0, 18).reverse().map(r => {
-        if (r.correct === 1) return `<span class="track-cell win" title="hit">✓</span>`;
-        if (r.correct === 0) return `<span class="track-cell loss" title="miss">✗</span>`;
-        return `<span class="track-cell pending" title="awaiting outcome">·</span>`;
-      }).join('');
-      html += `<div class="track-strip">${cells}</div>`;
-    }
-
-    body.innerHTML = html;
-  }
-
-  async function initTrust() {
-    try {
-      const d = await getJSON(`${API}/predict/calibration`);
-      _calib = d.buckets || [];
-      const live = _calib.filter(b => b.n > 0).length;
-      $('trust-meta').textContent = live ? `${live} buckets` : 'accumulating';
-    } catch (e) {
-      _calib = [];
-      $('trust-meta').textContent = 'offline';
-    }
-    renderTrust();
-  }
   /* ══════════════════════════════════════════════════════════════
      CONTAINER 6 — SYMBOL-AWARE AURA CHAT
      Streaming chat that knows (a) the user's finances from
@@ -809,7 +672,7 @@
       ? `USER FINANCES (this month): income ₹${Math.round(income).toLocaleString('en-IN')}, expenses ₹${Math.round(expense).toLocaleString('en-IN')}, savings rate ${savingsRate != null ? savingsRate + '%' : 'n/a'}.\nTop categories (30d):\n${cats}`
       : `USER FINANCES: no transaction data yet (guide them to the Payments page if relevant).`;
 
-    return `You are AURA, the AI advisor inside FLUX's prediction cockpit. You sit next to a quantitative trading agent and the live chart for ${state.symbol}.
+    return `You are the advisor inside FLUX. Use plain, everyday language and avoid jargon (no 'Kelly', 'regime', 'calibrated', 'conformal'). You sit next to a quantitative trading agent and the live chart for ${state.symbol}.
 Be concise, specific and data-driven. Use **bold** for key numbers. Keep answers under 180 words unless asked for depth.
 When explaining the model's call, ground it in the LIVE AGENT SIGNAL below — never invent numbers. The calibrated confidence already reflects the model's real hit-rate; the meta act-gate decides whether the edge is worth trading. Be honest about uncertainty and the no-trade case.
 
@@ -873,7 +736,7 @@ ${fin}
     const ac = (p.action || 'BUY').toLowerCase(), rc = (p.risk_level || 'Medium').toLowerCase();
     const card = document.createElement('div');
     card.className = 'msg-row aura';
-    card.innerHTML = `<div class="msg-sender">AURA</div>
+    card.innerHTML = `<div class="msg-sender">Advisor</div>
       <div class="proposal-card">
         <div class="proposal-hd">
           <div><div class="proposal-type-tag">Investment Proposal</div><div class="proposal-name">${escapeHtml(p.asset || p.ticker || '')}</div></div>
@@ -899,14 +762,14 @@ ${fin}
     const feed = $('msg-feed');
     const row = document.createElement('div');
     row.className = `msg-row ${role}`;
-    row.innerHTML = `<div class="msg-sender">${role === 'user' ? 'You' : 'AURA'}</div><div class="bubble ${role}">${html}</div><div class="msg-ts">${timestamp || ts()}</div>`;
+    row.innerHTML = `<div class="msg-sender">${role === 'user' ? 'You' : 'Advisor'}</div><div class="bubble ${role}">${html}</div><div class="msg-ts">${timestamp || ts()}</div>`;
     feed.appendChild(row); feed.scrollTop = feed.scrollHeight;
     return row.querySelector('.bubble');
   }
   function appendTyping() {
     const feed = $('msg-feed');
     const row = document.createElement('div'); row.className = 'msg-row aura'; row.id = 'typing-row';
-    row.innerHTML = `<div class="msg-sender">AURA</div><div class="typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
+    row.innerHTML = `<div class="msg-sender">Advisor</div><div class="typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
     feed.appendChild(row); feed.scrollTop = feed.scrollHeight; return row;
   }
   function loadHistory() { try { chatHistory = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch (_) { chatHistory = []; } return chatHistory; }
@@ -953,7 +816,7 @@ ${fin}
       }
     } catch (e) {
       typingRow.remove();
-      appendRow('aura', `<span style="color:var(--T3)">AURA is offline — is Ollama running? <code>ollama serve</code></span>`);
+      appendRow('aura', `<span style="color:var(--T3)">The advisor can't answer right now. Please try again in a minute.</span>`);
     }
     if (full) {
       const proposal = tryParseProposal(full);
@@ -969,7 +832,7 @@ ${fin}
   function bootGreeting() {
     const hour = new Date().getHours();
     const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-    const intro = `${greet}, Nishanth. I'm **AURA**, wired into the prediction agent.\n\nI can see the live model call on whatever asset you load in the chart — ask me to **explain this call**, stress-test **the risk**, or compare assets. I also know your finances from the Payments page.`;
+    const intro = `${greet}, Nishanth. Ask me why the forecast says what it does, what could go wrong, or how it fits your spending and savings.`;
     appendRow('aura', mdToHtml(intro));
   }
 
@@ -1005,23 +868,6 @@ ${fin}
     });
   }
 
-  /* ─────────────── HEADER: AGENT HEALTH ─────────────── */
-  // Reflects whether the Ollama-backed LLM (verifier + AURA chat) is actually
-  // reachable — the calibrated model signal itself doesn't depend on this.
-  async function loadAgentHealth() {
-    const dot = $('model-dot'), txt = $('model-badge-text');
-    if (!dot || !txt) return;
-    try {
-      const d = await getJSON(`${API}/health`, 4000);
-      const up = !!(d.agent && d.agent.available);
-      dot.className = 'model-dot' + (up ? '' : ' offline');
-      txt.textContent = up ? 'AURA v4.2 · Agent online' : 'AURA v4.2 · Agent offline';
-    } catch (e) {
-      dot.className = 'model-dot offline';
-      txt.textContent = 'AURA v4.2 · API offline';
-    }
-  }
-
   // expose for cross-container use
   window.__advisor = { state, setSymbol, CHARTABLE };
 
@@ -1029,11 +875,7 @@ ${fin}
   window.addEventListener('DOMContentLoaded', () => {
     initChart();
     initLeaderboard();
-    initVerifier();
-    initTrust();
     initChat();
-    loadAgentHealth();
-    setInterval(loadAgentHealth, 60000);
   });
 
 })();

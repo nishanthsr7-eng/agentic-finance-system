@@ -255,44 +255,70 @@
   let retryTimer = null;
   let hydrated   = false;
 
+  // One /db/bootstrap call; the 7 separate routes stay as a fallback for an
+  // API that predates it (Pages and Render don't deploy at the same instant).
+  function fetchAll() {
+    return get(`/db/bootstrap`).catch((err) => {
+      if (!/→ 404$/.test(err.message)) throw err;
+      return Promise.all([
+        get(`/db/transactions?limit=2000`),
+        get(`/db/accounts`),
+        get(`/db/portfolio`),
+        get(`/db/recurring`),
+        get(`/db/contacts`),
+        get(`/db/security`),
+        get(`/db/rewards`),
+      ]).then(([transactions, accounts, portfolio, recurring, contacts, security, rewards]) =>
+        ({ transactions, accounts, portfolio, recurring, contacts, security, rewards }));
+    });
+  }
+
+  // The login page fetches /db/bootstrap before redirecting and leaves it in
+  // sessionStorage, so the first page after login renders real data at once.
+  function takePrefetched() {
+    try {
+      const raw = sessionStorage.getItem('flux_bootstrap');
+      if (!raw) return null;
+      sessionStorage.removeItem('flux_bootstrap');
+      const { at, data } = JSON.parse(raw);
+      return Date.now() - at < 60000 ? data : null;
+    } catch (_) { return null; }
+  }
+
+  function apply(b) {
+    const tx = b.transactions, acc = b.accounts, pf = b.portfolio, rec = b.recurring,
+          con = b.contacts, sec = b.security, rew = b.rewards;
+    // Expose raw payloads for any page that wants to read directly.
+    window.FluxData = { tx, acc, pf, rec, con, sec, rew };
+
+    changed = false;
+    put('flux_transactions', mapTransactions(tx));
+    put('flux_accounts', mapAccounts(acc));
+    put('flux_portfolio', mapPortfolio(pf));
+    put('flux_recurring', mapRecurring(rec));
+    put('flux_contacts', mapContacts(con));
+    put('flux_protocols', mapProtocols(sec));
+    put('flux_reward_states', mapRewardStates(rew));
+
+    // Stop seed.js from injecting its hardcoded fallback.
+    if (localStorage.getItem('flux_seeded') !== SEED_VERSION) {
+      localStorage.setItem('flux_seeded', SEED_VERSION);
+      changed = true;
+    }
+
+    const firstSuccess = !hydrated;
+    hydrated = true;
+    if (localStorage.getItem('flux_sample_data') === '1') { SampleBadge.clear(); changed = true; }
+    retryDelay = 15000;
+    // Refresh pages on data change OR on offline→online recovery, so widgets
+    // that rendered an empty state while the backend was down repopulate.
+    if (changed || firstSuccess) {
+      window.dispatchEvent(new CustomEvent('flux:data-updated', { detail: window.FluxData }));
+    }
+  }
+
   function hydrate() {
-    return Promise.all([
-      get(`/db/transactions?limit=2000`),
-      get(`/db/accounts`),
-      get(`/db/portfolio`),
-      get(`/db/recurring`),
-      get(`/db/contacts`),
-      get(`/db/security`),
-      get(`/db/rewards`),
-    ]).then(([tx, acc, pf, rec, con, sec, rew]) => {
-      // Expose raw payloads for any page that wants to read directly.
-      window.FluxData = { tx, acc, pf, rec, con, sec, rew };
-
-      changed = false;
-      put('flux_transactions', mapTransactions(tx));
-      put('flux_accounts', mapAccounts(acc));
-      put('flux_portfolio', mapPortfolio(pf));
-      put('flux_recurring', mapRecurring(rec));
-      put('flux_contacts', mapContacts(con));
-      put('flux_protocols', mapProtocols(sec));
-      put('flux_reward_states', mapRewardStates(rew));
-
-      // Stop seed.js from injecting its hardcoded fallback.
-      if (localStorage.getItem('flux_seeded') !== SEED_VERSION) {
-        localStorage.setItem('flux_seeded', SEED_VERSION);
-        changed = true;
-      }
-
-      const firstSuccess = !hydrated;
-      hydrated = true;
-      if (localStorage.getItem('flux_sample_data') === '1') { SampleBadge.clear(); changed = true; }
-      retryDelay = 15000;
-      // Refresh pages on data change OR on offline→online recovery, so widgets
-      // that rendered an empty state while the backend was down repopulate.
-      if (changed || firstSuccess) {
-        window.dispatchEvent(new CustomEvent('flux:data-updated', { detail: window.FluxData }));
-      }
-    }).catch((err) => {
+    return fetchAll().then(apply).catch((err) => {
       // Backend offline → keep existing localStorage / seed.js defaults and
       // retry with backoff so the page self-heals when the backend comes up.
       console.warn('[FLUX] DB hydration failed (backend offline?), retrying in ' +
@@ -310,5 +336,7 @@
     get hydrated() { return hydrated; },
   };
 
-  hydrate();
+  const prefetched = takePrefetched();
+  if (prefetched) apply(prefetched);
+  else hydrate();
 })();

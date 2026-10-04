@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from backend import ingestion, main
+from backend.routes import market
 
 client = TestClient(main.app)
 
@@ -19,7 +20,7 @@ def test_old_nifty_candles_url_is_404_not_500():
 
 
 def test_candle_assets():
-    assert set(main._CANDLE_SYMBOL_MAP) == {"btc", "eth", "spy"}
+    assert set(market._CANDLE_SYMBOL_MAP) == {"btc", "eth", "spy"}
 
 
 def test_ingestion_no_longer_fetches_nifty():
@@ -28,20 +29,21 @@ def test_ingestion_no_longer_fetches_nifty():
 
 
 def test_holding_quote_symbols():
-    assert main._holding_yf_symbol({"symbol": "BTC", "asset_type": "crypto"}) == "BTC-USD"
+    assert market._holding_yf_symbol({"symbol": "BTC", "asset_type": "crypto"}) == "BTC-USD"
     assert (
-        main._holding_yf_symbol({"symbol": "SPY", "asset_type": "etf", "currency": "USD"}) == "SPY"
+        market._holding_yf_symbol({"symbol": "SPY", "asset_type": "etf", "currency": "USD"})
+        == "SPY"
     )
     assert (
-        main._holding_yf_symbol({"symbol": "TCS", "asset_type": "equity", "currency": "INR"})
+        market._holding_yf_symbol({"symbol": "TCS", "asset_type": "equity", "currency": "INR"})
         == "TCS.NS"
     )
 
 
 def test_usd_holdings_convert_through_fx():
-    assert main._holding_needs_fx({"asset_type": "crypto", "currency": "INR"})
-    assert main._holding_needs_fx({"asset_type": "etf", "currency": "USD"})
-    assert not main._holding_needs_fx({"asset_type": "equity", "currency": "INR"})
+    assert market._holding_needs_fx({"asset_type": "crypto", "currency": "INR"})
+    assert market._holding_needs_fx({"asset_type": "etf", "currency": "USD"})
+    assert not market._holding_needs_fx({"asset_type": "equity", "currency": "INR"})
 
 
 def test_shipped_model_has_no_nifty():

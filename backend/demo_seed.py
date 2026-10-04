@@ -314,6 +314,30 @@ def _today_transactions(today: date) -> list[tuple]:
     return out
 
 
+def _fill_quiet_days(rows: list[tuple], today: date) -> list[tuple]:
+    """One small spend on any of the last 30 days that has none, so the
+    Analysis cashflow heatmap shows activity every day. Seeded by the day
+    itself, so a given date always gets the same row on every reseed."""
+    spent = {r[0].date() for r in rows if r[2] < 0}
+    out = []
+    for back in range(1, 30):
+        day = today - timedelta(days=back)
+        if day in spent:
+            continue
+        rng = random.Random(day.toordinal() * 13 + 5)
+        title, lo, hi, cat = rng.choice(
+            [
+                (rng.choice(["Blue Tokai Coffee", "Third Wave Coffee"]), 180, 420, "lifestyle"),
+                (rng.choice(GROCERY) + " / Groceries", 350, 1600, "essentials"),
+                (rng.choice(RIDE), 110, 380, "lifestyle"),
+                ("Swiggy Instamart", 160, 540, "essentials"),
+            ]
+        )
+        when = datetime(day.year, day.month, day.day, rng.randint(9, 21), rng.randint(0, 59))
+        out.append((when, title, -float(rng.randint(lo, hi)), cat, WAL))
+    return out
+
+
 def build_transactions(today: date, now: datetime) -> list[tuple]:
     start = today - timedelta(days=365)
     rows: list[tuple] = []
@@ -322,6 +346,7 @@ def build_transactions(today: date, now: datetime) -> list[tuple]:
         rows += _month_transactions(month.year, month.month, start, today)
         month = _add_months(month, 1)
     rows += _today_transactions(today)
+    rows += _fill_quiet_days(rows, today)
     # Nothing in the future: today's rows only up to the moment of seeding.
     rows = [r for r in rows if r[0] <= now]
     rows.sort(key=lambda r: (r[0], r[1]))

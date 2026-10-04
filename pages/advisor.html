@@ -92,13 +92,8 @@
     <header class="dash-header">
       <div style="display:flex;align-items:center;gap:16px;">
         <h1 class="header-title">Smart Advisor</h1>
-        <span class="adv-tag">PREDICTION COCKPIT</span>
       </div>
       <div class="user-profile" style="display:flex;align-items:center;gap:24px;">
-        <div class="model-badge" id="model-badge" title="LLM verifier/chat agent (Ollama) status">
-          <div class="model-dot" id="model-dot"></div>
-          <span id="model-badge-text">AURA v4.2 · checking…</span>
-        </div>
         <div class="user-info"><div class="user-name">Nishanth S</div></div>
         <div class="avatar">NS</div>
       </div>
@@ -140,37 +135,10 @@
               <div class="chart-status" id="chart-status">Loading market data…</div>
             </div>
 
-            <!-- ── CONTAINER 2: SIGNAL CONSOLE STRIP ── -->
-            <div class="signal-strip" id="signal-strip">
-              <div class="sig-tile">
-                <div class="sig-lbl">Agent call</div>
-                <div class="sig-val skel" id="sig-dir"></div>
-                <div class="sig-sub" id="sig-asof">—</div>
-              </div>
-              <div class="sig-tile">
-                <div class="sig-lbl">Confidence</div>
-                <div class="sig-val skel" id="sig-conf"></div>
-                <div class="sig-sub" id="sig-conf-sub">calibrated</div>
-              </div>
-              <div class="sig-tile">
-                <div class="sig-lbl">Position</div>
-                <div class="sig-val skel" id="sig-size"></div>
-                <div class="sig-sub" id="sig-size-sub">Kelly</div>
-              </div>
-              <div class="sig-tile">
-                <div class="sig-lbl">Regime · sentiment</div>
-                <div class="sig-val skel" id="sig-regime"></div>
-                <div class="sig-sub" id="sig-sent">—</div>
-              </div>
-            </div>
-
-            <!-- ── 5-DAY OUTLOOK: the calibrated price range, re-based to the live price ── -->
-            <div class="outlook" id="outlook">
-              <div class="ol-head">
-                <span class="ol-title"><span id="ol-h">5</span>-day outlook</span>
-                <span class="ol-meta" id="ol-meta">—</span>
-              </div>
-              <div class="ol-body" id="ol-body"><span class="skel skel-note"></span></div>
+            <!-- ── VERDICT: the forecast in plain words ── -->
+            <div class="verdict" id="verdict">
+              <span class="skel skel-note"></span>
+              <span class="skel skel-note short"></span>
             </div>
           </section>
 
@@ -180,8 +148,8 @@
             <!-- CONTAINER 3: CONVICTION LEADERBOARD -->
             <section class="panel mini-panel">
               <div class="mini-head">
-                <span class="mini-title">Conviction Board</span>
-                <span class="mini-meta" id="lb-meta">agent · all assets</span>
+                <span class="mini-title">Other forecasts</span>
+                <span class="mini-meta" id="lb-meta">all assets</span>
               </div>
               <div class="mini-body" id="lb-body">
                 <div class="skel-row"><span class="skel skel-rank"></span><span class="skel skel-sym"></span><span class="skel skel-dir"></span><span class="skel skel-bar"></span><span class="skel skel-conf"></span></div>
@@ -189,31 +157,6 @@
                 <div class="skel-row"><span class="skel skel-rank"></span><span class="skel skel-sym"></span><span class="skel skel-dir"></span><span class="skel skel-bar"></span><span class="skel skel-conf"></span></div>
                 <div class="skel-row"><span class="skel skel-rank"></span><span class="skel skel-sym"></span><span class="skel skel-dir"></span><span class="skel skel-bar"></span><span class="skel skel-conf"></span></div>
                 <div class="skel-row"><span class="skel skel-rank"></span><span class="skel skel-sym"></span><span class="skel skel-dir"></span><span class="skel skel-bar"></span><span class="skel skel-conf"></span></div>
-              </div>
-            </section>
-
-            <!-- CONTAINER 4: VERIFIER -->
-            <section class="panel mini-panel">
-              <div class="mini-head">
-                <span class="mini-title">Verifier · 2nd opinion</span>
-                <button class="mini-btn" id="vf-btn">Run</button>
-              </div>
-              <div class="mini-body" id="vf-body">
-                <div class="mini-empty">The LLM risk-manager red-teams the model's call. Click <b>Run</b> for <span id="vf-sym">BTC</span>.</div>
-              </div>
-            </section>
-
-            <!-- CONTAINER 5: MODEL TRUST & TRACK RECORD -->
-            <section class="panel mini-panel">
-              <div class="mini-head">
-                <span class="mini-title">Model Trust</span>
-                <span class="mini-meta" id="trust-meta">calibration</span>
-              </div>
-              <div class="mini-body" id="trust-body">
-                <div class="skel-acc"><span class="skel skel-acc-val"></span><span class="skel skel-acc-lbl"></span></div>
-                <span class="skel skel-note"></span>
-                <span class="skel skel-note short"></span>
-                <span class="skel skel-chart"></span>
               </div>
             </section>
 
@@ -231,8 +174,8 @@
                 </svg>
               </div>
               <div>
-                <div class="chat-name">AURA Advisor</div>
-                <div class="chat-sub" id="chat-sub">Context-aware · ask about <span id="chat-ctx-sym">BTC</span></div>
+                <div class="chat-name">Advisor</div>
+                <div class="chat-sub" id="chat-sub">Ask about <span id="chat-ctx-sym">BTC</span> or your finances</div>
               </div>
             </div>
             <button class="clear-btn" id="clear-btn">Clear</button>
@@ -249,7 +192,7 @@
 
           <div class="input-row">
             <textarea class="chat-input" id="chat-input"
-              placeholder="Ask AURA about this asset…" rows="1"></textarea>
+              placeholder="Ask about this asset or your money…" rows="1"></textarea>
             <button class="send-btn" id="send-btn" title="Send">
               <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5">
                 <line x1="22" y1="2" x2="11" y2="13"/>

@@ -250,6 +250,10 @@
     if (!order) return;
     const { px, qty, clamped } = computeOrder();
     const usd = px > 0 ? qty * px : (parseFloat(($("execSizeInput") || {}).value) || 0);
+    // SELL capped at the holding: show the capped amount in the box too, unless
+    // the user is typing in it right now.
+    const sizeBox = $("execSizeInput");
+    if (clamped && sizeBox && document.activeElement !== sizeBox) sizeBox.value = usd.toFixed(2);
 
     const setT = (id, v) => { const el = $(id); if (el) el.textContent = v; };
     setT("execPrice", px > 0 ? fmtPrice(px) : "—");
@@ -335,6 +339,7 @@
   function wireOrderTicket() {
     const sizeInput = $("execSizeInput");
     if (sizeInput) sizeInput.addEventListener("input", () => { confirmArmed = false; showOrderError(""); updateOrderSummary(); });
+    if (sizeInput) sizeInput.addEventListener("blur", updateOrderSummary);
     const limitInput = $("execLimitPrice");
     if (limitInput) limitInput.addEventListener("input", () => { confirmArmed = false; updateOrderSummary(); });
     const btn = $("execConfirmBtn");

@@ -1,7 +1,7 @@
 # API Reference
 
-HTTP endpoints exposed by the FastAPI backend (`backend/main.py` and the
-included routers). Base URL in development: `http://localhost:8000`.
+HTTP endpoints exposed by the FastAPI backend (`backend/main.py`, the
+routers in `backend/routes/` and the other included routers). Base URL in development: `http://localhost:8000`.
 
 Interactive docs are available at `http://localhost:8000/docs` (Swagger) and
 `/redoc` while the server is running.
