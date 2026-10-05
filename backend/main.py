@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import llm
+from . import llm, log_redact
 from .auth import auth_router, ensure_auth_schema
 from .cache import cache
 from .config import settings
@@ -27,6 +27,8 @@ from .user_api import db_router
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
+# Error messages quote request URLs, keys included; mask them in every record.
+log_redact.install()
 # httpx logs every request URL at INFO, and Finnhub/NewsAPI take the API key as a
 # query parameter, so those lines would put the keys in the Render logs.
 for _noisy in ("httpx", "httpcore"):
