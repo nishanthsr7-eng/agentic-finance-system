@@ -21,8 +21,7 @@ Most need the datasets described in [docs/DATASETS.md](../../docs/DATASETS.md).
 | 8 | Does the verifier only ever lower confidence, and does the flywheel run? | `gate8_llm_verifier_audit.py` | Pass |
 | 9 | Does the model beat naive baselines at all? | `gate9_honesty_baselines_audit.py` | Not on raw accuracy; see the main README |
 
-`fluxx_audit.py` audits the FLUX-X model end to end. `probe_bnb.py` and
-`probe_forex.py` are one-off data-source probes.
+`fluxx_audit.py` audits the FLUX-X model end to end.
 
 A gate that fails leaves its component switched off. The regime stack (gate 6)
 is an example: it did not beat the plain model, so it is not served.

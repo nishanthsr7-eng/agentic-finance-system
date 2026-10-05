@@ -1,4 +1,4 @@
-"""Calibration ECE must be scored out of sample (step 12)."""
+"""Calibration ECE must be scored out of sample."""
 
 import numpy as np
 

@@ -9,8 +9,24 @@
 <p align="center"><b><a href="https://nishanth-flux.pages.dev">Live demo: nishanth-flux.pages.dev</a></b></p>
 
 <p align="center">
-  <img src="docs/demo.webp" alt="Tour of FLUX: landing page, one-click demo sign-in, Dashboard, Marketplace with asset view, chart and a paper trade, Analysis with the strategy tester, Smart Advisor forecast and AI chat, and Payments" width="100%">
+  <img src="docs/demo.webp" alt="Tour of FLUX: one-click demo sign-in, Dashboard, Marketplace with asset view, chart and a paper trade, Analysis with the strategy tester, and the Smart Advisor forecast and AI chat" width="100%">
 </p>
+<p align="center"><sub><a href="docs/demo.mp4">Watch the full-HD version (MP4)</a></sub></p>
+
+---
+
+## At a glance
+
+- **Leak-free forecasting:** XGBoost on triple-barrier labels, validated with
+  purged, embargoed walk-forward CV over 133,753 out-of-fold predictions.
+- **Honest uncertainty:** isotonic-calibrated probabilities (ECE 0.022) and
+  GARCH-shaped conformal bands that cover exactly 80.0% / 90.0% out of fold.
+- **An LLM that can say no:** a news-reading verifier can downgrade or veto
+  every call, and each forecast is graded publicly when it matures.
+- **Production on 512 MB:** FastAPI, TiDB, ChromaDB RAG and an MCP server,
+  deployed on free tiers with CI, a Docker smoke test and migrations.
+- **Results stated plainly:** the model does *not* beat always-up on raw
+  accuracy; its edge is in the confident subset ([Results](#results)).
 
 ---
 
@@ -201,12 +217,24 @@ purged walk-forward CV and conformal bands. PyTorch (FinBERT, CryptoBERT, the
 LSTM magnitude head, Chronos) is optional research tooling that the deployed
 build does not install.
 
-**Tooling:** GitHub Actions (pytest, Ruff, Docker smoke test, static build
-check), Docker, Render Blueprint (`render.yaml`).
+**Tooling:** GitHub Actions (pytest, Playwright, Ruff, mypy, Docker smoke test,
+static build check), Docker Compose, Render Blueprint (`render.yaml`).
 
 ---
 
 ## Quick Start
+
+### With Docker (one command)
+
+```bash
+docker compose up --build
+```
+
+This starts MySQL, seeds the demo user, runs the API on port 8000 and serves the
+frontend on <http://localhost:3000>. API keys are optional; put any you have in
+`.env` (copied from `.env.example`) and they are passed through.
+
+### Without Docker
 
 ```bash
 # 1. Frontend dependencies
@@ -243,14 +271,19 @@ Two suites: the prediction agent (feature engineering, leakage guards, the
 ensemble, portfolio construction) and the API (auth guards, trading, rate
 limiting, migrations, MySQL pool; the database and network are faked).
 
+A third suite drives the frontend in a real browser with Playwright (landing
+page, demo sign-in, a rejected login), with the API mocked.
+
 ```bash
 pytest backend/prediction -q
 pytest backend/tests -q
+npm run test:e2e
 ```
 
-CI runs the prediction suite on Python 3.10 and 3.12 and the API suite against
-the locked slim requirements the Docker image uses, plus Ruff, a Docker
-`/health` smoke test and a static-build check, on every push and pull request.
+CI runs the prediction suite on Python 3.10 and 3.12, the API suite against
+the locked slim requirements the Docker image uses, the Playwright suite, Ruff,
+mypy on the API package, a Docker `/health` smoke test and a static-build check,
+on every push and pull request.
 
 ---
 
@@ -278,6 +311,7 @@ the locked slim requirements the Docker image uses, plus Ruff, a Docker
 ├── Dataset/                # Training datasets (created locally, not committed)
 ├── ai_engine/              # Ollama model files
 ├── mcp/                    # Model Context Protocol server
+├── e2e/                    # Playwright frontend smoke tests
 └── docs/                   # This documentation set
 ```
 

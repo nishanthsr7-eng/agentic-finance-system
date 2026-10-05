@@ -411,8 +411,9 @@ async def portfolio_value(user_id: int = Depends(require_user)):
         yf_sym = _holding_yf_symbol(h)
         last = prices.get(yf_sym)
         is_usd = _holding_needs_fx(h)
-        if last is not None and (not is_usd or fx):
-            value = qty * last * (fx if is_usd else 1.0)
+        rate = fx if is_usd else 1.0
+        if last is not None and rate:
+            value = qty * last * rate
             total_value += value
             total_cost += cost
             rows.append(
@@ -422,7 +423,7 @@ async def portfolio_value(user_id: int = Depends(require_user)):
                     "asset_type": h["asset_type"],
                     "quantity": qty,
                     "avg_price": float(h["avg_price"]),
-                    "last_price_inr": round(last * (fx if is_usd else 1.0), 2),
+                    "last_price_inr": round(last * rate, 2),
                     "value_inr": round(value, 2),
                     "cost_inr": round(cost, 2),
                     "pnl_pct": round((value - cost) / cost * 100, 2) if cost else 0,
@@ -529,7 +530,7 @@ async def market_candles(
         candles = await loop.run_in_executor(None, _fetch_candles_sync, yf_symbol, period, interval)
     except Exception as e:
         log.error("yfinance %s %s/%s failed: %s", yf_symbol, period, interval, e)
-        raise HTTPException(502, f"yfinance fetch failed: {e}") from e
+        raise HTTPException(502, "Price history unavailable") from e
 
     if not candles:
         raise HTTPException(404, f"No data returned for {asset_lower} / {tf}")
@@ -634,7 +635,7 @@ async def market_indicators(symbol: str):
         result = await loop.run_in_executor(None, _compute_indicators_sync, yf_symbol)
     except Exception as e:
         log.error("indicators %s failed: %s", yf_symbol, e)
-        raise HTTPException(502, f"yfinance failed: {e}") from e
+        raise HTTPException(502, "Indicators unavailable") from e
 
     if not result:
         raise HTTPException(404, f"Insufficient data for {yf_symbol}")

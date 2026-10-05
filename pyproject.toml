@@ -34,6 +34,14 @@ filterwarnings = [
     "ignore::FutureWarning",
 ]
 
+[tool.mypy]
+# Checked in CI: the API package. The research-heavy prediction code is not
+# type-checked yet; its numeric pandas code would need stubs first.
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+exclude = ["backend/prediction/", "backend/tests/", "backend/migrations/"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

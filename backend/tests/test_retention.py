@@ -1,4 +1,4 @@
-"""ingestion_log retention (step 9d) and the backup script's JSON encoding."""
+"""ingestion_log retention and the backup script's JSON encoding."""
 
 from __future__ import annotations
 

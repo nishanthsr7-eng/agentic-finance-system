@@ -78,7 +78,8 @@ def db_health(x_admin_token: str | None = Header(default=None)) -> dict:
     counts = {}
     for t in tables:
         try:
-            counts[t] = M.query_one(f"SELECT COUNT(*) AS n FROM `{t}`")["n"]
+            row = M.query_one(f"SELECT COUNT(*) AS n FROM `{t}`")
+            counts[t] = row["n"] if row else None
         except Exception:  # noqa: BLE001
             counts[t] = None
     return {"ok": True, "database": M.settings.MYSQL_DB, "counts": counts}

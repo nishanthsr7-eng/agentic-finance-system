@@ -158,7 +158,9 @@ def require_user(authorization: str | None = Header(default=None)) -> int:
 def is_admin(token: str | None) -> bool:
     """True only when ADMIN_TOKEN is configured and `token` matches it."""
     expected = settings.ADMIN_TOKEN
-    return bool(expected) and bool(token) and hmac.compare_digest(token, expected)
+    if not expected or not token:
+        return False
+    return hmac.compare_digest(token, expected)
 
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
@@ -229,6 +231,8 @@ def register(body: RegisterRequest) -> dict:
         )
         uid = cur.lastrowid
     user = M.query_one("SELECT * FROM users WHERE id=%s", (uid,))
+    if user is None:
+        raise HTTPException(500, "Account could not be created")
     return {"token": mint_token(uid), "user": _public_user(user)}
 
 

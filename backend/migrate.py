@@ -76,6 +76,8 @@ def _apply(cur, path: Path) -> None:
             cur.execute(stmt)
         return
     spec = importlib.util.spec_from_file_location(f"flux_migration_{path.stem}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load migration {path.name}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.up(cur)

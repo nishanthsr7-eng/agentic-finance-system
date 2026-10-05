@@ -1,8 +1,8 @@
 """
-FLUX-X — The Advanced Algorithm (serving capstone, Workflow §4)
+FLUX-X — The Advanced Algorithm (serving capstone)
 ==============================================================
 Every phase (0–9) built one organ of FLUX-X; this module is the spinal cord that runs the
-full per-rebalance loop end to end, exactly as specified in ``Workflow.md §4``:
+full per-rebalance loop end to end, in ten steps:
 
     1. FEATURES ─┐
     2. REGIME    │  per-symbol → predict.predict()  (Layers 1–2: features, regime, base
@@ -34,7 +34,7 @@ Honesty contract (inherited, enforced in code):
 
 Public API:
     await construct_book(predictions, equity=..., ...)  -> dict  (live step 8)
-    await run_flux_x(equity=None, verify_top_k=5, ...)  -> dict  (the full §4 loop)
+    await run_flux_x(equity=None, verify_top_k=5, ...)  -> dict  (the full loop)
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _edge(p: dict) -> float:
 
 
 def _conviction(p: dict) -> float:
-    """Signed edge × meta-prob — the Phase-7 cross-sectional ranking score (spec step 8)."""
+    """Signed edge × meta-prob — the cross-sectional ranking score (step 8)."""
     meta = p.get("meta_prob")
     return _edge(p) * float(meta if meta is not None else 0.5)
 
@@ -246,7 +246,7 @@ async def run_flux_x(
     equity: float | None = None, verify_top_k: int = 5, live_submit: bool = False, **book_kw
 ) -> dict:
     """
-    The full FLUX-X §4 loop, in order — the production rebalance turn.
+    The full FLUX-X loop, in order — the production rebalance turn.
 
       regime refresh → resolve matured (flywheel) → predict+log the universe (steps 1–7) →
       construct the cross-sectional book (step 8) → red-team its top-k (step 9, veto/downgrade
