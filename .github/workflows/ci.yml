@@ -125,7 +125,7 @@ jobs:
           for f in index.html 404.html robots.txt sitemap.xml _headers                    pages/login.html pages/signin.html pages/dashboard.html pages/advisor.html                    pages/analysis.html pages/marketplace.html pages/payments.html                    js/flux-config.js js/flux-data.js css/base.css; do
             test -f "dist/$f" || { echo "missing dist/$f"; exit 1; }
           done
-          for f in backend seed_mysql.py scripts package.json IMPROVEMENTS.local.md; do
+          for f in backend scripts package.json IMPROVEMENTS.local.md; do
             test ! -e "dist/$f" || { echo "dist/$f must not be published"; exit 1; }
           done
           grep -q "flux-api-vono.onrender.com" dist/js/flux-config.js

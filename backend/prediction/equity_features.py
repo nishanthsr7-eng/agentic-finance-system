@@ -8,7 +8,7 @@ per-(symbol, date) feature frame capturing the information price/technical facto
 mirror of ``crypto_features.py`` and Phase 4 of the FLUX-X workflow.
 
 GATE-4 OUTCOME — FAILS (within-noise tie), so the block is DEFAULT OFF. Read before changing it:
-  On the identical pooled panel (scripts/gate4_equity_fundamentals_eval.py, like-for-like on shared OOF rows) the
+  On the identical pooled panel (scripts/experiments/gate4_equity_fundamentals_eval.py, like-for-like on shared OOF rows) the
   equity-subset OOF AUC is 0.5107 -> 0.5099 (-0.0008) vs the Phase-3 pooled model — a wash, no
   structural lift. Quarterly fundamentals are slowly-varying step functions with little directional
   power at the 5-day triple-barrier horizon (they matter at monthly+ horizons), so per the honesty

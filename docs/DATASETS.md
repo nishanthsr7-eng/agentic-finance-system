@@ -1,11 +1,16 @@
 # Datasets
 
-How to download every dataset the prediction agent trains on. All datasets are
-staged locally under `Dataset/`. The download scripts live in `scripts/` and are
-run from the project root.
+How to download every dataset the prediction agent was trained or tested on.
+Files are staged locally under `Dataset/` (git-ignored, not in the repo). The
+download scripts live in `scripts/` and are run from the project root.
 
+> **What the served model needs:** only §1, the daily OHLCV history. Every other
+> dataset feeds a feature block that was tested and switched off (see
+> [docs/AGENT_TRAINING.md](AGENT_TRAINING.md) §6); they are needed only to
+> re-run those experiments.
+>
 > Most sources are keyless and public. Kaggle requires `KAGGLE_USERNAME` /
-> `KAGGLE_KEY` in `.env` (see [docs/API_KEYS.md](API_KEYS.md)).
+> `KAGGLE_KEY` (see [docs/API_KEYS.md](API_KEYS.md)).
 
 ---
 
@@ -13,15 +18,15 @@ run from the project root.
 
 | Dataset | Script | Keyless | Destination |
 |---|---|---|---|
-| Daily OHLCV history (train backbone) | `scripts/backfill_history.py` | yes (yfinance) | `ohlcv_history` table |
+| Daily OHLCV history (**served model**) | `scripts/backfill_history.py` | yes (yfinance) | `ohlcv_history` table |
 | Binance funding + 1d klines | `scripts/dl_binance.py` | yes | `Dataset/binance/` |
 | Binance open interest | `scripts/dl_binance_oi_parallel.py` | yes | `Dataset/binance/` |
 | Deribit DVOL (implied vol) | `scripts/dl_deribit.py` | yes | `Dataset/deribit/` |
 | Coin Metrics on-chain | `scripts/dl_coinmetrics.py` | yes | `Dataset/coinmetrics/` |
 | Blockchain.com on-chain | included CSVs | yes | `Dataset/*.csv` |
 | Crypto Fear & Greed | included JSON | yes | `Dataset/fng.json` |
-| SEC fundamentals | EDGAR (manual/build script) | `SEC_USER_AGENT` | `Dataset/SEC.../` |
-| Financial PhraseBank | Hugging Face | `HUGGINGFACE_TOKEN` | `Dataset/financial_phrasebank/` |
+| SEC fundamentals | EDGAR bulk archives (manual download) | yes | `Dataset/SEC.../` |
+| Financial PhraseBank | Hugging Face | yes (public) | `Dataset/financial_phrasebank/` |
 | Huge Stock Market | Kaggle | `KAGGLE_*` | `Dataset/Huge Stock Market Dataset/` |
 | Stooq bulk EOD | <https://stooq.com> | yes | `Dataset/Stooq bulk EOD/` |
 
@@ -30,14 +35,17 @@ run from the project root.
 ## 1. Daily OHLCV History (primary training backbone)
 
 The model trains on *years* of daily bars stored in the `ohlcv_history` SQLite
-table — separate from the 30-day live table.
+table - separate from the 30-day live table.
 
 ```bash
 python scripts/backfill_history.py
 ```
 
-- Pulls `period="max"` daily OHLCV via yfinance for all 15 stocks, 15 crypto,
-  and macro series (S&P 500, VIX, 10Y yield).
+- Pulls `period="max"` daily OHLCV via yfinance for the 30-symbol universe
+  (crypto, stocks and the S&P 500 / VIX / 10Y-yield market series).
+- In production, `MARKET_STORE=mysql` plus `scripts/copy_history_to_tidb.py`
+  keeps this table in TiDB so it survives redeploys; the daily 00:10 UTC job
+  appends new bars.
 - Upserts on `(symbol, date)`, so re-running is safe and idempotent.
 - Use `--symbols AAPL BTC` to backfill a subset for a smoke test.
 
@@ -118,8 +126,9 @@ Staged as `Dataset/fng.json` (2018→). Source API:
 ## 7. SEC Fundamentals
 
 Point-in-time fundamentals from SEC EDGAR financial-statement data sets, staged
-under `Dataset/SEC financial statement data sets/`. Requires a descriptive
-`SEC_USER_AGENT` (contact email) per SEC policy. The loader lives at
+under `Dataset/SEC financial statement data sets/`. Download the quarterly zip
+files by hand; SEC asks automated clients to send a User-Agent with a contact
+email. The loader lives at
 `backend/prediction/datasources/sec_fundamentals.py`; `Dataset/company_tickers.json`
 maps tickers to CIK numbers. Bulk archives:
 <https://www.sec.gov/dera/data/financial-statement-data-sets>.
@@ -128,13 +137,14 @@ maps tickers to CIK numbers. Bulk archives:
 
 ## 8. Financial PhraseBank (sentiment fine-tune/eval)
 
-14,787 finance sentences labelled by sentiment — the standard FinBERT
-evaluation set. Staged under `Dataset/financial_phrasebank/`. Pull via Hugging
-Face (`financial_phrasebank`) with `HUGGINGFACE_TOKEN`.
+14,787 finance sentences labelled by sentiment - the standard FinBERT
+evaluation set, used by the gate-5 sentiment checks. Staged under
+`Dataset/financial_phrasebank/`. Public on Hugging Face (`financial_phrasebank`);
+no token needed.
 
 ---
 
-## 9. Huge Stock Market Dataset (Kaggle — breadth/backfill)
+## 9. Huge Stock Market Dataset (Kaggle - breadth/backfill)
 
 7,195 stocks + 1,344 ETFs of historical prices, staged under
 `Dataset/Huge Stock Market Dataset/`.
@@ -146,7 +156,7 @@ kaggle datasets download -d borismarjanovic/price-volume-data-for-all-us-stocks-
   -p "Dataset/Huge Stock Market Dataset" --unzip
 ```
 
-Use this for breadth and cross-validation only — never train production signals
+Use this for breadth and cross-validation only - never train production signals
 solely on it.
 
 ---
@@ -161,12 +171,13 @@ Staged (zipped) under `Dataset/Stooq bulk EOD/`. Source:
 
 ## Dataset Roles Summary
 
-| Block | Datasets | Role in the model |
+| Block | Datasets | Status |
 |---|---|---|
-| Price backbone | yfinance OHLCV, Stooq, Huge Stock Market | features + labels |
-| Crypto positioning | Binance funding/OI, Deribit DVOL | orthogonal crypto signal |
-| On-chain | Coin Metrics, blockchain.com | crypto fundamentals |
-| Crypto regime | Fear & Greed | regime feature |
-| Equity fundamentals | SEC, FMP, Tiingo | equity feature block |
-| Macro | FRED, VIX/yields | regime + equity features |
-| Sentiment | Financial PhraseBank, news, Reddit | sentiment block |
+| Price backbone | yfinance OHLCV (incl. S&P 500, VIX, 10Y yield) | **Served**: features + labels |
+| Price cross-checks | Stooq, Huge Stock Market | Validation only |
+| Crypto positioning | Binance funding/OI, Deribit DVOL | Gate 2 failed: off |
+| On-chain | Coin Metrics, blockchain.com | Gate 2 failed: off |
+| Crypto regime | Fear & Greed | Gate 2 failed: off |
+| Equity fundamentals | SEC | Gate 4 tie: off |
+| Macro | FRED | Gate 1: hurt ranking Sharpe, off |
+| Sentiment | Financial PhraseBank, news, Reddit | Off as a feature; live news drives the confidence tilt |

@@ -9,7 +9,7 @@ stacking) — IF it is given decorrelated, informative inputs. The flat stack fa
 because its inputs were all near-duplicate views of one thin XGBoost signal. Phase 6 finally
 earns the stack its place by fixing that.
 
-WHAT MOVED THE NEEDLE (verified on the leak-free OOF, scripts/gate6_regime_ensemble_diagnostic.py):
+WHAT MOVED THE NEEDLE (verified on the leak-free OOF, scripts/experiments/gate6_regime_ensemble_diagnostic.py):
   • A DECORRELATED 2nd base learner — an ElasticNet logistic (`p2_base`) over the full feature
     set. corr(primary_cal, p2_base) ≈ 0.42, NOT a duplicate: trees and a regularised linear model
     make different errors, and that diversity is what lets a stack add AUC. With it, a parsimonious

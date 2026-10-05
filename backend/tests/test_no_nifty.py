@@ -54,3 +54,15 @@ def test_shipped_model_has_no_nifty():
         (Path(__file__).parents[1] / "prediction" / "models" / "model_meta.json").read_text()
     )
     assert not any("NIFTY" in s or "NSEI" in s for s in meta["fd_orders"])
+
+
+def test_leaderboard_hides_stored_nifty_predictions(monkeypatch):
+    # Old NIFTY rows may stay in the database; the Advisor list must not show them.
+    from backend.routes import predict
+
+    async def fake_latest(_sym, _limit):
+        return [{"symbol": "NIFTY"}, {"symbol": "BTC"}]
+
+    monkeypatch.setattr(predict, "get_latest_predictions", fake_latest)
+    r = client.get("/predict/leaderboard")
+    assert [row["symbol"] for row in r.json()["leaderboard"]] == ["BTC"]

@@ -1,6 +1,7 @@
 """AI insights, RAG Q&A, asset intel and chat."""
 
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -15,6 +16,10 @@ from ..rag import rag_query
 from .common import _AI_LIMIT, _cached_assets, _insight_job, _now_iso, log
 
 router = APIRouter()
+
+# Shown to users instead of the provider's error text, which can include HTTP bodies
+# and setup hints. The full error still goes to the log.
+_AI_DOWN = "The AI service is unavailable right now. Please try again shortly."
 
 
 # ── §B: AI Insights Endpoints ─────────────────────────────────────────────────
@@ -80,7 +85,7 @@ async def ai_rag_query(body: RagQueryRequest):
         answer = await llm.chat(messages, timeout=45.0)
     except llm.LLMError as exc:
         log.error("RAG chat failed: %s", exc)
-        raise HTTPException(503, str(exc)) from exc
+        raise HTTPException(503, _AI_DOWN) from exc
     except Exception as exc:
         log.error("RAG chat failed: %s", exc)
         raise HTTPException(502, "AI unavailable") from exc
@@ -100,7 +105,7 @@ async def ai_rag_query(body: RagQueryRequest):
 
 
 class _ChatMsg(BaseModel):
-    role: str = Field(..., max_length=20)
+    role: Literal["system", "user", "assistant"]
     content: str = Field(..., max_length=20_000)
 
 
@@ -206,12 +211,9 @@ async def ai_chat_stream(body: ChatRequest):
             # The provider's own terminator is consumed by the token generator,
             # so the sentinel the client waits on is emitted here.
             yield "data: [DONE]\n\n"
-        except llm.LLMError as exc:
-            yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
-            yield "data: [DONE]\n\n"
         except Exception as e:
             log.error("Streaming chat error: %s", e)
-            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {_json.dumps({'error': _AI_DOWN})}\n\n"
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -237,7 +239,7 @@ async def ai_chat(body: ChatRequest):
         return {"content": content}
     except llm.LLMError as e:
         log.error("AI chat failed: %s", e)
-        raise HTTPException(503, str(e)) from e
+        raise HTTPException(503, _AI_DOWN) from e
     except Exception as e:
         log.error("AI chat failed: %s", e)
         raise HTTPException(502, "AI unavailable") from e

@@ -1,124 +1,77 @@
-# API Keys
+# API Keys and Settings
 
-How to obtain every API key and credential FLUX uses. All values go into the
-`.env` file in the project root (see [docs/SETUP.md](SETUP.md)). Every market
-key is optional and degrades gracefully — the minimum set for the live dashboard
-is **Finnhub + CoinGecko + NewsAPI**.
+Every key and setting FLUX reads, where to get it, and what breaks without it.
+Values go into `.env` in the project root locally (read by `backend/config.py`)
+or into the Render environment in production. Every market key is optional: a
+missing key turns its feature off instead of crashing the app.
 
 > Security: never commit `.env`, never paste real keys into documentation or
 > source, and rotate any key that has been exposed.
 
 ---
 
-## Market Data
+## Used by the running app
 
-### Finnhub — `FINNHUB_API_KEY`
-- Used for: live equity quotes, per-ticker company news, earnings calendar.
-- Get it: <https://finnhub.io/register> → free tier (60 requests/min).
+| Variable | Used for | Without it | Get it |
+|---|---|---|---|
+| `FINNHUB_API_KEY` | Stock quotes, earnings dates (the earnings gate) | Stock panels return 503 | <https://finnhub.io/register>, free (60 req/min) |
+| `COINGECKO_API_KEY` | Top-15 crypto quotes, market caps, sparklines | Works keyless at a lower rate limit | <https://www.coingecko.com/en/api>, Demo plan (sent as `x-cg-demo-api-key`) |
+| `NEWSAPI_KEY` | Headline ticker, per-asset news, news for sentiment | News panels return 503 | <https://newsapi.org/register>, free developer tier |
+| `ALPHA_VANTAGE_API_KEY` | Extra news-sentiment source | Source skipped | <https://www.alphavantage.co/support/#api-key>, free (25 req/day) |
+| `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` | Subreddit sentiment | Source skipped | <https://www.reddit.com/prefs/apps> → "script" app |
+| `LLM_API_KEY` | Insights, chat, news sentiment, the verifier (production: Groq) | Falls back to local Ollama | <https://console.groq.com/keys>, free |
+| `LLM_BASE_URL`, `LLM_MODEL` | OpenAI-compatible endpoint and model | Defaults to Groq and `openai/gpt-oss-120b` | - |
+| `OLLAMA_URL`, `OLLAMA_MODEL` | Local LLM when `LLM_API_KEY` is empty | AI panels show "unavailable" | Defaults `http://localhost:11434`, `aura` |
+| `SENTIMENT_BACKEND` | `auto` (FinBERT/CryptoBERT if PyTorch is installed, else LLM), `transformers`, or `llm` | `auto` | Production pins `llm` (PyTorch doesn't fit in 512 MB) |
 
-### CoinGecko — `COINGECKO_API_KEY`
-- Used for: top-15 crypto quotes, market caps, 7-day sparklines.
-- Get it: <https://www.coingecko.com/en/api> → Demo plan. The demo key is sent
-  via the `x-cg-demo-api-key` header.
+## Security settings
 
-### Alpha Vantage — `ALPHA_VANTAGE_API_KEY`
-- Used for: backup price history, fundamentals, news sentiment.
-- Get it: <https://www.alphavantage.co/support/#api-key> (free, 25 req/day).
-
-### Polygon.io — `POLYGON_API_KEY`
-- Used for: equity aggregates / intraday (optional upgrade path).
-- Get it: <https://polygon.io/dashboard/signup> → free tier.
-
-### NewsAPI — `NEWSAPI_KEY`
-- Used for: finance/crypto headlines (ticker drawer + scrolling ticker).
-- Get it: <https://newsapi.org/register> → free developer tier.
-
-### FRED — `FRED_API_KEY`
-- Used for: macro regime features (term/credit spread, rates, CPI).
-- Get it: <https://fredaccount.stlouisfed.org/apikeys> (free).
-
----
-
-## Crypto Data
-
-### Coinglass — `COINGLASS_API_KEY`
-- Used for: aggregated funding rate, open interest, liquidations.
-- Get it: <https://www.coinglass.com/pricing>.
-
-### CryptoCompare — `CRYPTOCOMPARE_API_KEY`
-- Used for: crypto social/market data.
-- Get it: <https://www.cryptocompare.com/cryptopian/api-keys> (free tier).
-
----
-
-## Fundamentals and Filings
-
-### Financial Modeling Prep — `FMP_API_KEY`
-- Used for: fundamentals, ratios, earnings calendar. Also serves the
-  no-auth stock-logo CDN used in the UI.
-- Get it: <https://site.financialmodelingprep.com/developer/docs> (free tier).
-
-### Tiingo — `TIINGO_API_KEY`
-- Used for: fundamentals and end-of-day prices.
-- Get it: <https://www.tiingo.com/account/api/token> (free tier).
-
-### SEC EDGAR — `SEC_USER_AGENT`
-- Used for: EDGAR fundamentals. This is **not a key** — SEC requires a
-  descriptive User-Agent containing a contact email.
-- Format: `your_name your_email@example.com`. See
-  <https://www.sec.gov/os/webmaster-faq#developers>.
-
----
-
-## Sentiment and Models
-
-### Hugging Face — `HUGGINGFACE_TOKEN`
-- Used for: pulling FinBERT, CryptoBERT, and foundation-model baselines.
-- Get it: <https://huggingface.co/settings/tokens> → a "read" token.
-
-### Reddit (PRAW) — `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`
-- Used for: retail-flow sentiment from finance subreddits.
-- Get it: <https://www.reddit.com/prefs/apps> → create a "script" app. The
-  client ID is under the app name; the secret is the `secret` field. Set a
-  descriptive `REDDIT_USER_AGENT`.
-
----
-
-## Paper Trading (never live)
-
-### Alpaca — `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`
-- Used for: paper-account forward testing of signals only. The backend hard-
-  defaults to the paper endpoint (`ALPACA_PAPER=true`) and never trades live.
-- Get it: <https://alpaca.markets/> → generate **paper** trading keys.
-
----
-
-## Datasets
-
-### Kaggle — `KAGGLE_USERNAME`, `KAGGLE_KEY`
-- Used for: downloading the Huge Stock Market dataset.
-- Get it: <https://www.kaggle.com/settings> → "Create New Token" downloads a
-  `kaggle.json` containing the username and key. Note the Kaggle CLI expects the
-  variable to be named `KAGGLE_KEY`.
-
----
-
-## Local Services (no key)
-
-| Variable | Purpose | Default |
+| Variable | Used for | Default |
 |---|---|---|
-| `OLLAMA_URL` | Local Ollama endpoint | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Model name to call | `aura` |
-| `MYSQL_*` | Seeded application database | `127.0.0.1:3306`, db `flux` |
-| `DB_PATH` / `CHROMA_PATH` | SQLite / ChromaDB locations | per-user app-data dir |
+| `AUTH_SECRET` | Signs login tokens. Set a long random value in production | Empty: generated once and saved to `auth_secret.key` in the app-data directory; on Render that file is lost on every deploy, logging everyone out |
+| `AUTH_REQUIRED` | `false` treats anonymous requests as the demo user (local only) | `true` |
+| `ADMIN_TOKEN` | `X-Admin-Token` for maintenance routes and `/db/health` details. Not in `render.yaml`; add it in the Render dashboard | Empty: those routes always answer 403 |
+| `CORS_ORIGINS` | Frontend origins allowed to call the API | `localhost:3000` and `127.0.0.1:3000` |
+
+## Databases and storage
+
+| Variable | Used for | Default |
+|---|---|---|
+| `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB` | User data (TiDB Serverless in production) | `127.0.0.1:3306`, db `flux` |
+| `MYSQL_SSL`, `MYSQL_SSL_CA` | TLS to MySQL (required by TiDB) | Off |
+| `MYSQL_POOL_SIZE` | Reuse connections; `0` opens one per query | `0` |
+| `MARKET_STORE` | `sqlite` or `mysql` for predictions and price history | `sqlite` |
+| `DB_PATH`, `CHROMA_PATH` | SQLite and ChromaDB locations | Per-user app-data directory |
+| `DEMO_RESEED` | Rebuild the demo user's data daily | `true` |
+
+Scheduler intervals (`INGESTION_INTERVAL_MIN`, `OHLCV_INTERVAL_MIN`,
+`NEWS_INTERVAL_MIN`, `INSIGHT_INTERVAL_MIN`), `INGESTION_ENABLED`,
+`HEAVY_JOBS_ON_STARTUP` and `RAG_ENABLED` are described in
+[docs/ARCHITECTURE.md](ARCHITECTURE.md) and [docs/DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
-## Minimum Configurations
+## Used only for training and research
 
-| Goal | Required keys |
+| Variable | Used for | Get it |
+|---|---|---|
+| `FRED_API_KEY` | FRED macro series for training and the gate-1 experiments (off in the served model) | <https://fredaccount.stlouisfed.org/apikeys>, free |
+| `KAGGLE_USERNAME`, `KAGGLE_KEY` | Read by the Kaggle CLI to download the Huge Stock Market dataset | <https://www.kaggle.com/settings> → "Create New Token" |
+| `HF_TOKEN` | Optional; read by Hugging Face tools. FinBERT, CryptoBERT and Financial PhraseBank are public | <https://huggingface.co/settings/tokens> |
+
+## Paper trading (never live)
+
+| Variable | Used for |
 |---|---|
-| Live dashboard + marketplace | `FINNHUB_API_KEY`, `COINGECKO_API_KEY`, `NEWSAPI_KEY` |
-| AI insights / chat / advisor | the above + Ollama running locally |
-| Prediction training (full) | add `FRED`, `HUGGINGFACE_TOKEN`, crypto + fundamentals keys, `KAGGLE_*` |
-| Paper forward-test | add `ALPACA_*` (paper) |
+| `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | Optional forward test on an Alpaca **paper** account (`backend/prediction/paper.py`). `ALPACA_PAPER` defaults to `true` and there is no live-trading code path. Not set in the deployment |
+
+---
+
+## Minimum configurations
+
+| Goal | Set |
+|---|---|
+| Local app with live prices | `FINNHUB_API_KEY`, `NEWSAPI_KEY` (CoinGecko works keyless) + MySQL |
+| AI features | the above + `LLM_API_KEY`, or Ollama running locally |
+| Production (Render) | the above + `AUTH_SECRET`, `ADMIN_TOKEN`, `CORS_ORIGINS`, `MYSQL_SSL`, `SENTIMENT_BACKEND=llm` |
+| Retraining | + `FRED_API_KEY`, plus the datasets in [docs/DATASETS.md](DATASETS.md) |

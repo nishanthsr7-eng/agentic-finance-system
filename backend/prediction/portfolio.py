@@ -54,7 +54,7 @@ return. They help drawdown only. So production stays LONG-ONLY edge-ranked, now 
 vol-target (and optional regime gate) as the drawdown lever.
 
 Run:  python -m backend.prediction.portfolio
-Audit: python scripts/gate7_portfolio_audit.py
+Audit: python scripts/experiments/gate7_portfolio_audit.py
 """
 
 from __future__ import annotations

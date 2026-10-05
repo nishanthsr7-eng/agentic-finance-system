@@ -35,10 +35,10 @@ Routes
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 
 from . import mysql_db as M
-from .auth import require_user
+from .auth import is_admin, require_user
 
 db_router = APIRouter(prefix="/db", tags=["mysql"])
 
@@ -47,9 +47,13 @@ db_router = APIRouter(prefix="/db", tags=["mysql"])
 
 
 @db_router.get("/health")
-def db_health() -> dict:
+def db_health(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Public: only whether MySQL answers. Database name and row counts need the admin
+    token, since they describe the data to anyone who asks."""
     if not M.ping():
         return {"ok": False, "error": "MySQL unreachable"}
+    if not is_admin(x_admin_token):
+        return {"ok": True}
     tables = [
         "users",
         "accounts",

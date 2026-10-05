@@ -1,7 +1,9 @@
 # Database backup and restore
 
 The only persistent database is MySQL on TiDB Serverless. SQLite on Render is a
-cache that refills itself within an hour, and Chroma rebuilds itself.
+cache: prices refill within an hour, Chroma rebuilds itself, and stored
+predictions return with the next daily cycle (or survive entirely once
+`MARKET_STORE=mysql`).
 
 ## Weekly backup (from your own machine)
 
@@ -29,7 +31,7 @@ in the database are kept.
 1. Create a new free TiDB Serverless cluster. Put its host, user and password in `.env`
    (`MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_SSL=true`).
 2. Create the schema: `python -m backend.migrate` (creates the `flux` tables).
-   If the `flux` database doesn't exist yet, run `python seed_mysql.py` instead,
+   If the `flux` database doesn't exist yet, run `python scripts/seed_mysql.py` instead,
    which creates it, runs the migrations and loads the reference data.
 3. With a backup: restore it as above. Without one: `seed_mysql.py` reference data
    plus the demo user, which the API re-seeds on boot (`DEMO_RESEED`, backend/demo_seed.py).

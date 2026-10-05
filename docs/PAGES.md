@@ -6,107 +6,88 @@ design-token system in `css/`, and behaviour by the ES modules in `js/`.
 
 ---
 
-## Landing — `index.html`
+## Landing - `index.html`
 
 The marketing entry point and product overview.
 
-- Hero section, animated counters, and feature highlights.
-- Live market preview and scrolling news ticker.
-- Navigation into the authenticated application.
-- Driven by `js/main.js`, `js/animations.js`, `js/counters.js`,
-  `js/particles.js`, `js/parallax.js`.
+- Hero section, feature highlights and navigation into the app.
+- Static page; driven by `js/main.js`.
 
-## Dashboard — `pages/dashboard.html`
+## Dashboard - `pages/dashboard.html`
 
-The authenticated home surface consolidating the user's financial picture.
+The signed-in home page.
 
-- Portfolio summary with mark-to-market valuation and unrealised P&L
-  (`GET /portfolio/value`).
-- Live spending and account insights from the seeded MySQL dataset.
-- Market overview cards and AI insights.
+- Daily briefing on the top mover, portfolio value, asset allocation, savings
+  score, income/spend cards and a cashflow chart, from the user's own data
+  (`GET /db/bootstrap`, one call for everything).
+- Live crypto and stock quotes for the briefing strip
+  (`/market/quotes/crypto`, `/market/quotes/stocks`).
+- First-time users get an account-setup overlay (`js/account-setup.js`); the
+  demo account skips it.
 - Driven by `js/dashboard.js`, `js/flux-data.js`.
 
-## Marketplace — `pages/marketplace.html`
+## Marketplace - `pages/marketplace.html`
 
-The trading and asset-discovery surface. **Requires authentication.**
+Quotes and paper trading.
 
-- Live crypto and equity quotes with sparklines and 24h change.
-- Paper-trading wallet, order placement, watchlist, and price alerts
-  (`backend/trading_api.py`).
-- Per-asset news drawer and AI intel.
+- Live crypto and stock quotes with sparklines, a headline ticker and a
+  screener (`/market/quotes/*`, `/market/summary`, `/market/news`).
+- Per-asset drawer: AI intel (`/ai/intel/{symbol}`) and a terminal chart with
+  RSI / MACD / volume (`/market/indicators/{symbol}`).
+- Order ticket: market or limit, BUY or SELL, filled at the server's quote;
+  SELL is capped at the holding (`/db/trades`, `/db/wallet`).
+- Watchlist and price alerts (`/db/watchlist`, `/db/alerts`).
 - Driven by `js/marketplace.js`, `js/market-live.js`.
 
-## Analysis — `pages/analysis.html`
+## Analysis - `pages/analysis.html`
 
-Charting and quantitative analysis workspace.
+Charts, spending and strategy testing.
 
-- Interactive OHLCV candlestick charts (1D / 7D / 1M / 1Y) via
+- Candlestick chart for BTC, ETH or SPY (1D / 7D / 1M / 1Y) via
   `GET /market/candles/{asset}`.
-- Technical indicators — RSI(14), MACD(12,26,9), volume — via
-  `GET /market/indicators/{symbol}`.
+- Cashflow heatmap of the last 30 days, the Live Ledger of the user's paper
+  trades (`/db/trades`), asset allocation (`/portfolio/value`) and LLM market
+  commentary (`/ai/insights`).
 - SMA-crossover backtester (`POST /backtest`) reporting total return, Sharpe,
-  max drawdown, win rate, and the equity curve.
+  max drawdown, win rate and the equity curve; the demo account runs a default
+  backtest on load.
 - Driven by `js/analysis.js`.
 
-## Smart Advisor — `pages/advisor.html`
+## Smart Advisor - `pages/advisor.html`
 
-The prediction cockpit — the user-facing window into the FLUX-X agent.
+The window into the prediction agent.
 
-- Forecast cone: recent close series plus the calibrated prediction point and
-  conformal band (`GET /predict/{symbol}/forecast`).
-- Calibrated confidence gauge, direction badge, and regime chip.
-- Reliability/calibration view (`GET /predict/calibration`) showing realised
-  hit-rate per confidence bucket — an honest empty state when no outcomes have
-  resolved yet.
-- Prediction leaderboard and LLM verifier verdicts (VETO / downgrade badges).
+- Chart of recent prices (live candles for BTC/ETH, 60 daily candles for the
+  rest) with the forecast range (`GET /predict/{symbol}/forecast`).
+- One verdict card: "BTC likely up over the next 5 days · 62% confidence", the
+  likely price range, suggested size, market regime, track record
+  (`/predict/{symbol}/history`), and the news check's verdict with its reason
+  (`/predict/{symbol}/verdict`; "Check now" re-runs `/predict/{symbol}/verify`).
+- "Other forecasts" for the remaining symbols (`/predict/leaderboard`,
+  `/predict/verdicts`).
+- Advisor chat (`/ai/chat/stream`).
 - Driven by `js/advisor.js` and `css/advisor.css`.
 
-## Payments — `pages/payments.html`
+## Payments - `pages/payments.html`
 
-Wallet and money-movement surface (paper / simulated).
+Simulated money movement.
 
-- Transactions, recurring payments, rewards, account switching, credit limits
-  (`backend/payments_api.py`).
+- Transactions, recurring payments, contacts, rewards, account switching and a
+  spending meter (`backend/payments_api.py`).
 - Driven by `js/payments.js`.
 
-## Privacy Shield — `pages/shield.html`
+## Login / Sign up - `pages/login.html`, `pages/signin.html`
 
-Privacy and data-control centre — manage consent, visibility, and
-privacy-related preferences.
+Log in, "Use demo account", or register (`backend/auth.py`). After login the
+page prefetches `/db/bootstrap` so the dashboard opens filled. Password reset
+is not available; the page says so.
 
-## Login / Sign In — `pages/login.html`, `pages/signin.html`
+## Info pages
 
-Authentication surfaces — register, log in, and session handling
-(`backend/auth.py`). Account-setup logic in `js/account-setup.js`.
-
-## Security — `pages/security.html`
-
-Describes the platform's security posture — hardened HTTP headers, strict CORS,
-hashed credentials, and the paper-only trading guarantee.
-
-## About — `pages/about.html`
-
-Company and product background.
-
-## Brand — `pages/brand.html`
-
-Brand assets and visual identity guidelines.
-
-## Careers — `pages/careers.html`
-
-Careers and hiring information.
-
-## Contact — `pages/contact.html`
-
-Contact form and support channels.
-
-## FAQ — `pages/faq.html`
-
-Frequently asked questions.
-
-## Legal — `pages/terms.html`, `pages/privacy.html`, `pages/cookies.html`
-
-Terms of service, privacy policy, and cookie policy.
+`about`, `brand`, `security`, `shield` (Privacy Shield), `careers`, `contact`,
+`faq`, `terms`, `privacy` and `cookies` in `pages/`, plus `404.html`. They complete the product site with placeholder
+copy for a fictional company. Careers and FAQ are filled from MySQL
+(`/db/careers`, `/db/faqs`); the contact form does not send anything.
 
 ---
 
@@ -114,11 +95,11 @@ Terms of service, privacy policy, and cookie policy.
 
 | Module | Responsibility |
 |---|---|
-| `js/main.js` | Global navigation, shared bootstrapping |
-| `js/flux-data.js` | API client / data fetching helpers |
-| `js/market-live.js` | Live quote polling and rendering |
-| `js/animations.js`, `js/scroll-animations.js` | Motion and reveal effects |
-| `js/particles.js`, `js/parallax.js`, `js/tilt-cards.js` | Visual effects |
-| `js/magnetic-buttons.js`, `js/counters.js` | Interactive UI components |
+| `js/flux-config.js` | API base URL: `localhost:8000` locally, the Render URL in production |
+| `js/flux-data.js` | API client; loads the user's data via `/db/bootstrap` |
+| `js/seed.js` | Offline fallback data, shown with a "Showing sample data" badge when the API is unreachable |
+| `js/account-setup.js` | First-login setup overlay |
+| `js/main.js` | Landing-page behaviour |
+| `js/market-live.js` | Live quote polling and rendering (Marketplace) |
 | `css/tokens.css` | Design tokens (the single source of theme truth) |
 | `css/base.css`, `css/layout-extensions.css` | Base layout and structure |

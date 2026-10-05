@@ -22,10 +22,19 @@ router = APIRouter()
 
 
 # ── Prediction agent (Layer 2: calibrated direction + conformal band + regime) ────
+# Symbols dropped from the product. Old predictions for them may still sit in the
+# database; they are kept there but never listed.
+RETIRED_SYMBOLS = {"NIFTY"}
+
+
+def _listed(rows):
+    return [r for r in rows if str(r.get("symbol", "")).upper() not in RETIRED_SYMBOLS]
+
+
 @router.get("/predict/leaderboard")
 async def predict_leaderboard(limit: int = Query(50, ge=1, le=200)):
     """Latest stored prediction per symbol, ranked by calibrated confidence."""
-    rows = await get_latest_predictions(None, limit)
+    rows = _listed(await get_latest_predictions(None, limit))
     return {"leaderboard": rows, "count": len(rows), "timestamp": _now_iso()}
 
 
@@ -56,7 +65,7 @@ async def predict_verdicts(limit: int = Query(50, ge=1, le=200)):
     """Latest verifier verdict per symbol — feeds leaderboard VETO/downgrade badges."""
     from ..db import get_latest_verdicts
 
-    rows = await get_latest_verdicts(limit)
+    rows = _listed(await get_latest_verdicts(limit))
     return {
         "verdicts": [_parse_verdict(r) for r in rows],
         "count": len(rows),

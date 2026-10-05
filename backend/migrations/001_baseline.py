@@ -1,5 +1,5 @@
 """Every table in mysql_db.DDL (CREATE TABLE IF NOT EXISTS), so an empty
-database boots complete. A no-op on a database seeded by seed_mysql.py."""
+database boots complete. A no-op on a database seeded by scripts/seed_mysql.py."""
 
 
 def up(cur):

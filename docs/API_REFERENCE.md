@@ -16,7 +16,7 @@ var; with `ADMIN_TOKEN` unset these always answer 403.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/health` | Liveness plus cache, scheduler, Chroma, ingestion, Ollama, and key status |
+| GET, HEAD | `/health` | Liveness plus cache, scheduler, Chroma, ingestion, LLM provider, and which API keys are set (never the keys) |
 | POST | `/cache/flush` 🛠 | Invalidate the crypto/stock quote caches |
 
 ## Live Market Data
@@ -67,7 +67,7 @@ var; with `ADMIN_TOKEN` unset these always answer 403.
 | GET | `/ai/insights?limit=&symbol=` | Latest pre-computed AI insights |
 | POST | `/ai/insights/refresh` 🛠 | Trigger an immediate insight cycle |
 | GET | `/ai/intel/{symbol}` 🔒 | Structured per-asset analysis (JSON) |
-| POST | `/ai/chat` 🔒 | Non-streaming chat via Ollama |
+| POST | `/ai/chat` 🔒 | Non-streaming chat via the configured LLM (Groq in production, Ollama locally); roles `system`, `user`, `assistant` |
 | POST | `/ai/chat/stream` 🔒 | Streaming chat (Server-Sent Events) |
 | POST | `/ai/rag/query` 🔒 | RAG-grounded financial Q&A |
 
@@ -75,25 +75,48 @@ var; with `ADMIN_TOKEN` unset these always answer 403.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/portfolio/value` | Mark-to-market valuation in INR (auth required) |
-| POST | `/backtest` 🔒 | SMA-crossover backtest via yfinance |
+| GET | `/portfolio/value` 🔒 | Mark-to-market valuation in INR |
+| POST | `/backtest` 🔒 | SMA-crossover backtest via yfinance; `404` with a reason when there is too little data |
 
-## Routers (included)
+## Auth (`backend/auth.py`)
 
-| Router | Source | Surface |
+| Method | Path | Description |
 |---|---|---|
-| Seeded dataset | `user_api.py` | `/db/*` data for user-facing pages |
-| Paper trading | `trading_api.py` | wallet, trades, watchlist, alerts |
-| Payments | `payments_api.py` | transactions, recurring, rewards |
-| Auth | `auth.py` | login, register, session/me |
+| POST | `/auth/register` | Create an account, returns a bearer token |
+| POST | `/auth/login` | Log in, returns a bearer token (rate-limited) |
+| GET | `/auth/me` 🔒 | The signed-in user |
+
+## User data, trading and payments (`/db/*`, MySQL)
+
+Every personal route reads the user from the bearer token; there is no
+`?user_id=` override.
+
+| Method | Path | Source | Description |
+|---|---|---|---|
+| GET | `/db/health` | `user_api.py` | `{"ok": true\|false}`; database name and row counts only with `X-Admin-Token` |
+| GET | `/db/bootstrap` 🔒 | `user_api.py` | Transactions, accounts, portfolio, recurring, contacts, security and rewards in one call (page-load hydration) |
+| GET | `/db/user`, `/db/accounts`, `/db/portfolio`, `/db/contacts`, `/db/security`, `/db/rewards` 🔒 | `user_api.py` | The pieces of the bootstrap payload, one per route |
+| GET | `/db/faqs`, `/db/careers`, `/db/team` | `user_api.py` | Static page content |
+| GET | `/db/market/catalog`, `/db/market/snapshots`, `/db/market/insights`, `/db/market/news`, `/db/market/predictions` | `user_api.py` | Market data mirrored in MySQL |
+| GET, POST | `/db/transactions` 🔒 | GET `user_api.py`, POST `payments_api.py` | Ledger (`?limit`, `?category`); POST records a payment |
+| GET, POST | `/db/recurring` 🔒 | GET `user_api.py`, POST `payments_api.py` | Recurring payments |
+| POST | `/db/accounts/activate`, `/db/rewards/claim`, `/db/security/toggle` 🔒 | `payments_api.py` | Payments-page actions |
+| GET | `/db/wallet` 🔒 | `trading_api.py` | Paper-trading cash and holdings |
+| GET, POST | `/db/trades` 🔒 | `trading_api.py` | Trade history; POST fills at the server's own quote and locks the wallet row |
+| GET, POST, DELETE | `/db/watchlist`, `/db/watchlist/{symbol}` 🔒 | `trading_api.py` | Watchlist |
+| GET, POST, DELETE | `/db/alerts`, `/db/alerts/{id}`, `POST /db/alerts/{id}/triggered` 🔒 | `trading_api.py` | Price alerts |
 
 ---
 
 ## Response Conventions
 
 - Market endpoints return `{ assets|candles|..., source, cached, timestamp }`.
-- Errors use standard HTTP status codes: `400` invalid input, `404` not found,
-  `502` upstream provider failure, `503` a required key/service is unavailable.
+- Errors use standard HTTP status codes: `400` invalid input, `401` not logged
+  in, `403` admin token missing, `404` not found, `422` failed validation, `429`
+  rate-limited (with `Retry-After`), `502` upstream provider failure, `503` a
+  required key/service is unavailable.
+- Error messages never include provider responses or exception text; those go
+  to the server log.
 - Timestamps are ISO-8601 UTC.
 - AI endpoints return an explicit `available: false` / `unavailable` state
   rather than fabricating output when the LLM is offline.
