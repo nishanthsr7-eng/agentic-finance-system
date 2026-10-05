@@ -135,42 +135,62 @@
   <main class="legal-content">
     <header class="legal-header">
       <h1 class="legal-title">Privacy Policy</h1>
-      <p class="section-subtitle">A transparent overview of how we protect and respect your personal data.</p>
+      <p class="section-subtitle">What we keep, in plain words.</p>
     </header>
 
     <div class="legal-body">
       <section class="legal-section">
-        <h2>Your Data, Your Control</h2>
-        <p>Privacy is a fundamental human right. At FLUX, we believe your personal information belongs to you. Our privacy framework is built to ensure you maintain total control over your digital identity.</p>
+        <h2>The Short Version</h2>
+        <p>FLUX is a demo, not a real financial service. Please don't enter real bank details or reuse a real password. The demo account is shared and refreshed regularly.</p>
       </section>
 
       <section class="legal-section">
-        <h2>Information We Collect</h2>
-        <p>We only collect the minimum amount of information necessary to provide our services and ensure account security.</p>
+        <h2>What Is Stored</h2>
+        <p>If you create an account, FLUX keeps:</p>
         <ul class="legal-list">
-          <li>Account credentials (encrypted at the edge)</li>
-          <li>Basic contact information provided during registration</li>
-          <li>Transactional data required for financial reporting</li>
-          <li>Device metadata for security and threat detection</li>
+          <li>Your name and email address</li>
+          <li>A scrambled version of your password (never the password itself)</li>
+          <li>The practice trades, balances and demo payments you make</li>
         </ul>
       </section>
 
       <section class="legal-section">
-        <h2>How We Protect It</h2>
-        <p>FLUX employs zero-knowledge architecture, meaning that we cannot view your decrypted data. All personal information is encrypted before it ever leaves your device.</p>
+        <h2>In Your Browser</h2>
+        <p>Your browser remembers that you're logged in and keeps a copy of your demo data so pages load faster. Logging out clears it.</p>
+      </section>
+
+      <section class="legal-section">
+        <h2>Third Parties</h2>
+        <p>FLUX uses trusted hosting and database services, Google Fonts, and a TradingView chart. If you use the Advisor chat, your question and a summary of your demo finances are sent to an AI service to answer it.</p>
+      </section>
+
+      <section class="legal-section">
+        <h2>Deleting Your Data</h2>
+        <p>Demo accounts may be cleared at any time.</p>
       </section>
     </div>
   </main>
 
   <footer class="footer">
     <div class="footer-bottom glass-pill">
-      <div class="nav-brand">FLUX</div>
-      <div class="footer-nav">
-        <a href="../index.html">Home</a>
+      <a href="../index.html" class="nav-brand">
+        <svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+        FLUX
+      </a>
+      <nav class="footer-nav" aria-label="Footer">
         <a href="about.html">About</a>
-        <a href="contact.html">Contact Us</a>
-      </div>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQs</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+      <nav class="footer-legal" aria-label="Legal">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
     </div>
+    <p class="footer-note">A personal project for learning and demonstration, not a real financial service. Brand names shown belong to their owners.</p>
   </footer>
 </body>
 

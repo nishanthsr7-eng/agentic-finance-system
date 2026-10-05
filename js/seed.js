@@ -94,7 +94,7 @@
   ]));
 
   localStorage.setItem('flux_portfolio', JSON.stringify({
-    equity: 45, crypto: 30, cash: 25, goal: 15000000
+    equity: 24, crypto: 14, cash: 62, goal: 15000000
   }));
 
   localStorage.setItem('flux_recurring', JSON.stringify([

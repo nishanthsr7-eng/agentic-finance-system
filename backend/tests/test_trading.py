@@ -165,3 +165,24 @@ def test_unknown_symbol_has_no_price(market, monkeypatch):
     with pytest.raises(HTTPException) as e:
         T.create_trade(_order(symbol="NOPE"), user_id=1)
     assert e.value.status_code == 503
+
+
+def test_refresh_quote_pool_refills_expired_crypto_cache(monkeypatch):
+    # Regression: the refresh looked for the fetchers on backend.main after they
+    # moved to the market router, so every trade on an expired cache failed.
+    import anyio
+
+    from backend.routes import market as M
+
+    async def fake_fetch():
+        return [{"symbol": "BINANCE:BTCUSDT", "sub": "BTC", "price": 50_000.0}]
+
+    monkeypatch.setattr(M, "_fetch_crypto_live", fake_fetch)
+    cache.invalidate("crypto")
+
+    async def run():
+        await anyio.to_thread.run_sync(T._refresh_quote_pool, "crypto")
+
+    anyio.run(run)
+    assert T._live_price("BTC") == 50_000.0
+    cache.invalidate("crypto")

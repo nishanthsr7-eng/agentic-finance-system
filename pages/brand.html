@@ -4,20 +4,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sovereign Architecture | Agentic AI Finance &amp; Stock Prediction</title>
+  <title>Tech Stack | Agentic AI Finance &amp; Stock Prediction</title>
   <meta name="description" content="The technology behind the Agentic AI Finance &amp; Stock Prediction System: FastAPI, XGBoost, ChromaDB RAG and a vanilla JS frontend.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300e5a0' stroke-width='2'%3E%3Cpath d='M13 2L3 14h9l-1 8 10-12h-9l1-8z'/%3E%3C/svg%3E">
   <link rel="canonical" href="https://nishanth-flux.pages.dev/pages/brand">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Agentic AI Finance &amp; Stock Prediction System">
-  <meta property="og:title" content="Our Technology &amp; Partners | Agentic AI Finance &amp; Stock Prediction System">
+  <meta property="og:title" content="Tech Stack | Agentic AI Finance &amp; Stock Prediction System">
   <meta property="og:description" content="The technology behind the Agentic AI Finance &amp; Stock Prediction System: FastAPI, XGBoost, ChromaDB RAG and a vanilla JS frontend.">
   <meta property="og:url" content="https://nishanth-flux.pages.dev/pages/brand">
   <meta property="og:image" content="https://nishanth-flux.pages.dev/assets/images/og-image.png">
   <meta property="og:image:width" content="1600">
   <meta property="og:image:height" content="1000">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Our Technology &amp; Partners | Agentic AI Finance &amp; Stock Prediction System">
+  <meta name="twitter:title" content="Tech Stack | Agentic AI Finance &amp; Stock Prediction System">
   <meta name="twitter:description" content="The technology behind the Agentic AI Finance &amp; Stock Prediction System: FastAPI, XGBoost, ChromaDB RAG and a vanilla JS frontend.">
   <meta name="twitter:image" content="https://nishanth-flux.pages.dev/assets/images/og-image.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -173,51 +173,44 @@
 
   <main class="tech-content">
     <header class="tech-header">
-      <h1 class="tech-title">Sovereign Architecture</h1>
-      <p class="section-subtitle">The underlying technology powering the future of digital finance.</p>
+      <h1 class="tech-title">Tech Stack</h1>
+      <p class="section-subtitle">Under the hood, for the curious.</p>
     </header>
-
     <div class="tech-hero-card">
       <section class="tech-section">
-        <h2>Zero-Knowledge Sovereignty</h2>
-        <p>FLUX is built on a proprietary Zero-Knowledge (ZK) infrastructure that allows for verifiable transactions without compromising individual privacy. This ensures that while the system is highly transparent for auditing, the identity and assets of the user remain exclusively theirs.</p>
-        <p>Our "Sovereign Proof" technology utilizes advanced cryptographic primitives to enable sub-second settlement times across distributed nodes, bypasssing traditional banking latency.</p>
-        
+        <h2>Prediction Pipeline</h2>
+        <p>Daily prices go through 42 causal features with fractional differencing, then an XGBoost direction model trained on triple-barrier labels with purged, embargoed walk-forward cross-validation. Probabilities are isotonic-calibrated, and GARCH-shaped conformal bands give 80% and 90% price ranges that cover what they claim.</p>
+        <p>An LLM verifier reads recent headlines and can lower or veto each call. Every forecast is stored and graded when it matures, so the track record on the Advisor page is real.</p>
         <div class="tech-tags">
-          <span class="tech-tag">ZK-SNARKs</span>
-          <span class="tech-tag">Sovereign Rollups</span>
-          <span class="tech-tag">Air-Gapped HSM</span>
-          <span class="tech-tag">Quantum-Safe Layers</span>
+          <span class="tech-tag">XGBoost</span>
+          <span class="tech-tag">Conformal Prediction</span>
+          <span class="tech-tag">GARCH</span>
+          <span class="tech-tag">Walk-Forward CV</span>
+          <span class="tech-tag">LLM Verifier</span>
+          <span class="tech-tag">ChromaDB RAG</span>
         </div>
       </section>
     </div>
-
     <section class="collaborators-section">
       <div class="tech-header" style="margin-bottom:40px;">
-        <h2 class="tech-title" style="font-size:40px;">Technical Collaborators</h2>
-        <p class="section-subtitle">The minds behind the FLUX architectural foundation.</p>
+        <h2 class="tech-title" style="font-size:40px;">The Layers</h2>
+        <p class="section-subtitle">Built and maintained by one developer, on free tiers.</p>
       </div>
-
       <div class="collaborators-grid">
         <div class="collab-card">
-          <img src="../assets/images/avatar-3.avif" alt="Marcus Thorne" class="collab-img">
-          <div class="collab-name">Marcus Thorne</div>
-          <div class="collab-role">Chief Architect</div>
-          <p style="font-size: 14px; margin-top: 16px; color: var(--text-secondary);">Expert in distributed ledger technology and ZK-cryptography systems.</p>
+          <div class="collab-name">Backend</div>
+          <div class="collab-role">FastAPI · Python</div>
+          <p style="font-size: 14px; margin-top: 16px; color: var(--text-secondary);">Routers for market data, predictions, trading, payments and the AI advisor. APScheduler runs ingestion and the nightly prediction job.</p>
         </div>
-        
         <div class="collab-card">
-          <img src="../assets/images/avatar-2.jpeg" alt="Elena Vance" class="collab-img">
-          <div class="collab-name">Elena Vance</div>
-          <div class="collab-role">Security Ops Lead</div>
-          <p style="font-size: 14px; margin-top: 16px; color: var(--text-secondary);">Former cybersecurity director specializing in air-gapped asset protection.</p>
+          <div class="collab-name">Data</div>
+          <div class="collab-role">TiDB Serverless · MySQL</div>
+          <p style="font-size: 14px; margin-top: 16px; color: var(--text-secondary);">Users, wallets, trades, price history and every stored prediction, with versioned migrations that run at boot.</p>
         </div>
-
         <div class="collab-card">
-          <img src="../assets/images/avatar-1.jpeg" alt="Soren Kjell" class="collab-img">
-          <div class="collab-name">Soren Kjell</div>
-          <div class="collab-role">Protocol Engineer</div>
-          <p style="font-size: 14px; margin-top: 16px; color: var(--text-secondary);">Pioneer in sub-millisecond settlement protocols and node optimization.</p>
+          <div class="collab-name">Frontend &amp; Ops</div>
+          <div class="collab-role">HTML · CSS · JS · Cloudflare</div>
+          <p style="font-size: 14px; margin-top: 16px; color: var(--text-secondary);">A static site on Cloudflare Pages, the API on Render, GitHub Actions CI and a Cloudflare Worker that keeps the API warm.</p>
         </div>
       </div>
     </section>
@@ -225,13 +218,24 @@
 
   <footer class="footer">
     <div class="footer-bottom glass-pill">
-      <div class="nav-brand">FLUX</div>
-      <div class="footer-nav">
-        <a href="../index.html">Home</a>
+      <a href="../index.html" class="nav-brand">
+        <svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+        FLUX
+      </a>
+      <nav class="footer-nav" aria-label="Footer">
         <a href="about.html">About</a>
-        <a href="contact.html">Contact Us</a>
-      </div>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQs</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+      <nav class="footer-legal" aria-label="Legal">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
     </div>
+    <p class="footer-note">A personal project for learning and demonstration, not a real financial service. Brand names shown belong to their owners.</p>
   </footer>
 </body>
 

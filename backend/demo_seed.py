@@ -360,12 +360,16 @@ def _trades(today: date, now: datetime, closes: dict[str, dict[str, float]]) -> 
     """8-15 paper trades over the last 30 days at that day's stored close.
     (symbol, name, side, qty, price, amount, trade_datetime)"""
     rng = random.Random(today.toordinal() * 7 + 1)
-    planned = []
+    planned, seen = [], set()
     for _ in range(rng.randint(8, 15)):
         day = _next_weekday(today - timedelta(days=rng.randint(1, 29)))
         if day > today:
             day = today - timedelta(days=3)
         sym = rng.choice(list(TRADE_SYMBOLS))
+        # One trade per symbol per day: two identical same-day rows read as a double fill.
+        if (sym, day) in seen:
+            continue
+        seen.add((sym, day))
         when = datetime(day.year, day.month, day.day, rng.randint(14, 19), rng.randint(0, 59))
         planned.append((when, sym, rng.randint(1, 8), rng.random()))
     planned.sort()
@@ -460,14 +464,25 @@ def build_demo_rows(today: date, now: datetime, closes: dict[str, dict[str, floa
     ]
 
     holdings = [
-        ("SPY", "SPDR S&P 500 ETF", "etf", 2, 48900.00, "USD"),
-        ("RELIANCE", "Reliance Industries", "equity", 35, 2890.00, "INR"),
-        ("TCS", "Tata Consultancy", "equity", 18, 3960.00, "INR"),
-        ("INFY", "Infosys Ltd", "equity", 60, 1540.00, "INR"),
-        ("BTC", "Bitcoin", "crypto", 0.085, 5400000, "INR"),
-        ("ETH", "Ethereum", "crypto", 1.4, 280000, "INR"),
-        ("SOL", "Solana", "crypto", 22, 14500, "INR"),
+        ("SPY", "SPDR S&P 500 ETF", "etf", 6, 48900.00, "USD"),
+        ("RELIANCE", "Reliance Industries", "equity", 60, 1290.00, "INR"),
+        ("TCS", "Tata Consultancy", "equity", 30, 3420.00, "INR"),
+        ("INFY", "Infosys Ltd", "equity", 80, 1510.00, "INR"),
+        ("BTC", "Bitcoin", "crypto", 0.03, 5400000, "INR"),
+        ("ETH", "Ethereum", "crypto", 0.4, 280000, "INR"),
+        ("SOL", "Solana", "crypto", 6, 14500, "INR"),
     ]
+
+    # Allocation is derived from the holdings (at cost) and the cash accounts, so the
+    # Dashboard's equity / crypto / cash split agrees with the Analysis holdings.
+    cost = {"equity": 0.0, "crypto": 0.0}
+    for _s, _n, kind, qty, avg, _c in holdings:
+        cost["crypto" if kind == "crypto" else "equity"] += qty * avg
+    cash_total = balances[SAV] + balances[WAL]
+    whole = cost["equity"] + cost["crypto"] + cash_total
+    crypto_pct = round(cost["crypto"] / whole * 100)
+    cash_pct = round(cash_total / whole * 100)
+    portfolio = (100 - crypto_pct - cash_pct, crypto_pct, cash_pct, 15000000)
 
     recurring = [
         ("AWS Infrastructure", 8500, 5, "business"),
@@ -582,6 +597,7 @@ def build_demo_rows(today: date, now: datetime, closes: dict[str, dict[str, floa
         "balances": balances,
         "transactions": transactions,
         "holdings": holdings,
+        "portfolio": portfolio,
         "recurring": recurring,
         "contacts": contacts,
         "goals": goals,
@@ -662,7 +678,7 @@ def write_demo_rows(conn, data: dict, today: date) -> None:
             )
             cur.execute(
                 "INSERT INTO portfolio (user_id,equity_pct,crypto_pct,cash_pct,goal) VALUES (%s,%s,%s,%s,%s)",
-                (uid, 45, 30, 25, 15000000),
+                (uid, *data["portfolio"]),
             )
             cur.executemany(
                 "INSERT INTO portfolio_holdings (user_id,symbol,name,asset_type,quantity,avg_price,currency) "

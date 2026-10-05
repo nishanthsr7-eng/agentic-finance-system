@@ -115,8 +115,8 @@ async def generate_asset_insight(asset: dict) -> dict | None:
 
     content = (
         f"{asset.get('name', asset['symbol'])} ({asset['symbol']}) — "
-        f"LLM commentary (not a model signal): {signal} | {sentiment.capitalize()}, "
-        f"LLM conviction {confidence}/100. "
+        f"AI news summary (not a forecast): {signal} | {sentiment.capitalize()}, "
+        f"AI conviction {confidence}/100. "
         f"{summary} Key level: {key_level}. Catalyst: {catalyst}."
     )
 

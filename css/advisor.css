@@ -422,3 +422,63 @@ body { font-family: var(--F); }
   .vd-facts { grid-template-columns: 1fr; }
   #lb-body { grid-template-columns: 1fr; }
 }
+
+/* ════════ SCROLLING FORECAST COLUMN (summary, chart, then all forecasts) ════════ */
+.adv-main {
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto; padding-right: 4px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.12) transparent;
+}
+.adv-main::-webkit-scrollbar { width: 4px; }
+.adv-main::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 10px; }
+.chart-panel { flex-shrink: 0; overflow: visible; }
+.chart-panel .chart-wrap { flex: none; height: 300px; min-height: 0; border-top: 1px solid var(--BD); }
+.bottom-row, .bottom-row .mini-panel { flex-shrink: 0; overflow: visible; }
+.bottom-row .mini-body { overflow: visible; flex: none; }
+
+/* Summary: one sentence-like call, colour only on the direction word */
+.verdict { border-top: 1px solid var(--BD); padding: 22px 24px; gap: 6px; }
+.vd-empty { font-size: 14px; color: var(--T2); padding: 6px 0; }
+.vd-kicker { font-size: 12px; color: var(--T3); }
+.vd-call { display: flex; align-items: baseline; gap: 12px; font-size: 28px; font-weight: 600; color: var(--W); line-height: 1.15; letter-spacing: -.01em; }
+.vd-call.up { color: var(--A); }
+.vd-call.down { color: var(--RED); }
+.vd-move { font-family: var(--M); font-size: 15px; font-weight: 500; color: var(--T2); font-variant-numeric: tabular-nums; }
+.vd-range { margin: 2px 0 0; font-size: 14px; color: var(--T2); }
+.vd-range b { color: var(--W); font-weight: 500; font-family: var(--M); font-variant-numeric: tabular-nums; }
+.vd-facts-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin: 10px 0 0; font-size: 13px; color: var(--T2); }
+.vd-facts-line b { font-weight: 500; color: var(--T1); }
+.vd-facts-line b.down { color: var(--RED); }
+.vd-link { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; color: var(--T3); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.vd-link:hover { color: var(--T1); }
+.vd-link:disabled { cursor: wait; text-decoration: none; }
+.vd-meta { margin-top: 6px; font-size: 11px; color: var(--T3); line-height: 1.6; }
+.vd-meta .stale { color: var(--AMB); }
+
+/* All forecasts: a plain two-column table */
+#lb-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); column-gap: 32px; padding: 4px 20px 12px; }
+.fc-row {
+  display: grid; grid-template-columns: 18px 64px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: none; border: 0; border-bottom: 1px solid var(--BD); padding: 11px 8px;
+  font-size: 13px; transition: background .15s;
+}
+.fc-row:hover { background: rgba(255,255,255,.03); }
+.fc-row.active { background: rgba(255,255,255,.05); }
+.fc-row.active .fc-sym { color: var(--W); }
+.fc-row:focus-visible { outline: 1px solid var(--BD2); outline-offset: -1px; }
+.fc-dir { font-size: 14px; text-align: center; color: var(--T3); }
+.fc-dir.up { color: var(--A); }
+.fc-dir.down, .fc-dir.veto { color: var(--RED); }
+.fc-sym { font-family: var(--M); font-weight: 600; color: var(--T1); }
+.fc-range { font-family: var(--M); font-variant-numeric: tabular-nums; color: var(--T2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-conf { color: var(--T2); white-space: nowrap; text-align: right; }
+.fc-conf.down { color: var(--RED); }
+
+@media (max-width: 1180px) {
+  .adv-main { overflow: visible; padding-right: 0; }
+}
+@media (max-width: 600px) {
+  .vd-call { font-size: 22px; }
+  #lb-body { grid-template-columns: 1fr; }
+}

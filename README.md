@@ -9,7 +9,7 @@
 <p align="center"><b><a href="https://nishanth-flux.pages.dev">Live demo: nishanth-flux.pages.dev</a></b></p>
 
 <p align="center">
-  <img src="docs/demo.webp" alt="Tour of the demo account: Dashboard, Smart Advisor, Analysis, Marketplace order ticket and Payments" width="100%">
+  <img src="docs/demo.webp" alt="Tour of FLUX: landing page, one-click demo sign-in, Dashboard, Marketplace with asset view, chart and a paper trade, Analysis with the strategy tester, Smart Advisor forecast and AI chat, and Payments" width="100%">
 </p>
 
 ---
@@ -153,9 +153,10 @@ what broke on the way, is in [docs/DEPLOYMENT_RECORD.md](docs/DEPLOYMENT_RECORD.
 
 - **Dashboard:** daily briefing on the top mover, portfolio value, asset
   allocation and cashflow, from the signed-in user's own data.
-- **Smart Advisor:** one verdict per asset ("BTC likely up over the next 5 days
-  · 62% confidence"), the 80% price range, suggested size, track record, and the
-  news check that can lower or veto the call. Other assets' forecasts below.
+- **Smart Advisor:** one call per asset ("Likely up", "Likely down", or "Flat"
+  when the expected move is under 1%), the 80% price range drawn as a cone on
+  the chart, confidence, suggested size, track record, and the news check that
+  can lower or veto the call. A table of every other asset's forecast below.
 - **Analysis:** live candles, a spending heatmap, the paper-trade ledger and a
   strategy backtester.
 - **Marketplace:** live crypto and stock quotes, a per-asset chart with RSI and

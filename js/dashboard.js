@@ -7,6 +7,19 @@ function isSameMonth(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth();
 }
 
+// Same days of last month as have passed this month (1st..today's date), so a
+// month-to-date figure is not compared with a whole month and shows -89%.
+function isSamePeriodLastMonth(d, now) {
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return isSameMonth(d, prev) && d.getDate() <= now.getDate();
+}
+
+// True when the transactions reach back to `start`, i.e. a comparison period
+// is fully covered rather than holding the first few weeks of demo data.
+function coversFrom(txs, start) {
+  return txs.some(t => new Date(t.date) <= start);
+}
+
 function getTransactions() {
   return JSON.parse(localStorage.getItem('flux_transactions') || '[]');
 }
@@ -14,10 +27,9 @@ function getTransactions() {
 function computeStatCards() {
   const txs = getTransactions();
   const now  = new Date();
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
   const thisMo = txs.filter(t => isSameMonth(new Date(t.date), now));
-  const lastMo = txs.filter(t => isSameMonth(new Date(t.date), prev));
+  const lastMo = txs.filter(t => isSamePeriodLastMonth(new Date(t.date), now));
 
   const sum = (arr) => arr.reduce((s, t) => s + t, 0);
   const income   = sum(thisMo.filter(t => t.amount > 0).map(t => t.amount));
@@ -58,9 +70,9 @@ function updateStatCards() {
         chgClass = spendPct > 0 ? 'down' : 'up';
         chgText  = `${spendPct > 0 ? '↑' : '↓'} ${Math.abs(spendPct)}% vs last month`;
       }
-    } else if (label === 'Invested (Total)') {
+    } else if (label === 'Invested (12 mo)') {
       val = invested;
-      chgText = 'All-time investments';
+      chgText = 'What you invested in the past year';
       chgClass = 'up';
     } else if (label === 'Net Savings') {
       val = savings;
@@ -101,7 +113,6 @@ function updateHeroMetrics() {
   }
 
   const now  = new Date();
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
   /* ── 24 h change: today's net txs as % of net worth ── */
   const NET_WORTH = 11845038;         // baseline from the hero card
@@ -115,7 +126,7 @@ function updateHeroMetrics() {
     .filter(t => { const d = new Date(t.date); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); })
     .reduce((s, t) => s + t.amount, 0);
   const lastMonthNet = txs
-    .filter(t => { const d = new Date(t.date); return d.getFullYear() === prev.getFullYear() && d.getMonth() === prev.getMonth(); })
+    .filter(t => isSamePeriodLastMonth(new Date(t.date), now))
     .reduce((s, t) => s + t.amount, 0);
   const monthlyPct = lastMonthNet !== 0
     ? ((thisMonthNet - lastMonthNet) / Math.abs(lastMonthNet) * 100).toFixed(1)
@@ -187,8 +198,10 @@ function refreshRevenueData() {
     yInc.push(inc); yExp.push(exp); yNet.push(inc - exp);
   }
   const yTotal     = yInc.reduce((s, v) => s + v, 0);
-  const prevYrTot  = txs
-    .filter(t => { const td = new Date(t.date); const s = new Date(now.getFullYear()-1, now.getMonth()-11, 1); const e = new Date(now.getFullYear()-1, now.getMonth()+1, 0); return td >= s && td <= e && t.amount > 0; })
+  const prevYrStart = new Date(now.getFullYear()-1, now.getMonth()-11, 1);
+  const prevYrEnd   = new Date(now.getFullYear()-1, now.getMonth()+1, 0);
+  const prevYrTot  = !coversFrom(txs, prevYrStart) ? 0 : txs
+    .filter(t => { const td = new Date(t.date); return td >= prevYrStart && td <= prevYrEnd && t.amount > 0; })
     .reduce((s, t) => s + t.amount, 0);
 
   revenueData.yearly.labels         = yLabels;
@@ -211,13 +224,12 @@ function refreshRevenueData() {
   });
   for (let i = 0; i < 5; i++) wkNet[i] = wkInc[i] - wkExp[i];
   const mTotal    = wkInc.reduce((s, v) => s + v, 0);
-  const prevMo    = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMoTot = txs.filter(t => isSameMonth(new Date(t.date), prevMo) && t.amount > 0).reduce((s,t) => s+t.amount, 0);
+  const prevMoTot = txs.filter(t => isSamePeriodLastMonth(new Date(t.date), now) && t.amount > 0).reduce((s,t) => s+t.amount, 0);
 
   revenueData.monthly.values         = wkInc;
   revenueData.monthly.highlightIndex = Math.min(4, Math.floor((now.getDate() - 1) / 7));
   revenueData.monthly.total          = '₹' + mTotal.toLocaleString('en-IN');
-  revenueData.monthly.comparison     = prevMoTot > 0 ? 'vs ₹' + prevMoTot.toLocaleString('en-IN') + ' last month' : '';
+  revenueData.monthly.comparison     = prevMoTot > 0 ? 'vs ₹' + prevMoTot.toLocaleString('en-IN') + ' same days last month' : '';
   revenueData.monthly.prevTotal      = prevMoTot;
   revenueMetrics.monthly.income  = wkInc;
   revenueMetrics.monthly.expense = wkExp;
@@ -793,7 +805,7 @@ function initTooltipEngine() {
         const { income, spend } = computeStatCards();
         const savingsRate = income > 0 ? Math.round((income - spend) / income * 100) : 0;
         const p = JSON.parse(localStorage.getItem('flux_portfolio') || '{}');
-        const eq = p.equity ?? 45, cr = p.crypto ?? 30, ca = p.cash ?? 25;
+        const eq = p.equity ?? 24, cr = p.crypto ?? 14, ca = p.cash ?? 62;
         const diversification = Math.round(100 - Math.max(eq, cr, ca));
         return `<b>SAVINGS SCORE</b><br/>Savings rate: ${savingsRate}%<br/>Equity ${eq}% · Crypto ${cr}% · Cash ${ca}%<br/>Diversification spread: ${diversification}%`;
       }
@@ -857,7 +869,7 @@ function initOptimizationSummary() {
     label.addEventListener('click', (e) => {
       e.stopPropagation();
       const p = JSON.parse(localStorage.getItem('flux_portfolio') || '{}');
-      const eq = p.equity ?? 45, cr = p.crypto ?? 30, ca = p.cash ?? 25;
+      const eq = p.equity ?? 24, cr = p.crypto ?? 14, ca = p.cash ?? 62;
       const { income, spend } = computeStatCards();
       const savingsRate = income > 0 ? Math.round((income - spend) / income * 100) : 0;
       showToast(`<b>Portfolio Snapshot</b><br/>Equity ${eq}% · Crypto ${cr}% · Cash ${ca}%<br/>Savings rate this month: ${savingsRate}%`, "info");
@@ -1069,13 +1081,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (calFooterVal) {
     const txs  = getTransactions();
     const now  = new Date();
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
     const monthTotal = txs
       .filter(t => isSameMonth(new Date(t.date), now) && t.amount < 0)
       .reduce((s, t) => s + Math.abs(t.amount), 0);
     const prevTotal = txs
-      .filter(t => isSameMonth(new Date(t.date), prev) && t.amount < 0)
+      .filter(t => isSamePeriodLastMonth(new Date(t.date), now) && t.amount < 0)
       .reduce((s, t) => s + Math.abs(t.amount), 0);
 
     calFooterVal.textContent = '₹' + monthTotal.toLocaleString('en-IN');
@@ -1420,8 +1431,8 @@ function updateAssetAllocation() {
   // Single source of truth: the allocation the user set in Account Setup.
   // Falls back to a sensible default only when nothing is configured.
   const p = JSON.parse(localStorage.getItem('flux_portfolio') || '{}');
-  const equityPct = p.equity ?? 45;
-  const cryptoPct = p.crypto ?? 30;
+  const equityPct = p.equity ?? 24;
+  const cryptoPct = p.crypto ?? 14;
   const cashPct   = p.cash   ?? 25;
 
   bars[0].style.width = `${equityPct}%`;
@@ -1559,8 +1570,8 @@ function _avgChange(assets) {
 // weighted by the user's equity / crypto allocation (cash stays flat).
 function blendedPortfolioPct(stockAvg, cryptoAvg) {
   const p  = JSON.parse(localStorage.getItem('flux_portfolio') || '{}');
-  const eq = (p.equity ?? 45) / 100;
-  const cr = (p.crypto ?? 30) / 100;
+  const eq = (p.equity ?? 24) / 100;
+  const cr = (p.crypto ?? 14) / 100;
   return eq * stockAvg + cr * cryptoAvg;
 }
 
@@ -1571,6 +1582,12 @@ async function fetchLiveQuotes(signal) {
     fetch(`${API_BASE}/market/quotes/stocks`, opts).then(r => r.json()),
   ]);
   return { crypto: cryptoRes.assets || [], stocks: stocksRes.assets || [] };
+}
+
+// Market quotes are USD. Sub-dollar coins (ADA, SHIB) need more decimals or they read as $0.
+function fmtUsdQuote(v) {
+  const digits = v >= 100 ? 0 : v >= 1 ? 2 : v >= 0.01 ? 4 : 8;
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 // Plausible, gently-drifting values so the card is never empty when offline.
@@ -1647,14 +1664,14 @@ async function refreshBriefing() {
 
   const CRYPTO_SUBS = new Set(['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX','MATIC','DOT']);
   const p = JSON.parse(localStorage.getItem('flux_portfolio') || '{}');
-  const holdsCrypto = (p.crypto ?? 30) > 0;
-  const holdsEquity = (p.equity ?? 45) > 0;
+  const holdsCrypto = (p.crypto ?? 14) > 0;
+  const holdsEquity = (p.equity ?? 24) > 0;
 
   if (moversEl) {
     moversEl.innerHTML = top3.map(a => {
       const up  = a.change_pct >= 0;
       const pct = (up ? '+' : '') + a.change_pct.toFixed(2) + '%';
-      const priceStr = a.price != null ? `<div class="mover-price">₹${Math.round(a.price).toLocaleString('en-IN')}</div>` : '';
+      const priceStr = a.price != null ? `<div class="mover-price">${fmtUsdQuote(a.price)}</div>` : '';
       return `<div class="mover-chip">
         <div class="mover-sym">${a.sub}</div>
         ${priceStr}
@@ -1669,7 +1686,7 @@ async function refreshBriefing() {
     const isCrypto = CRYPTO_SUBS.has(leader.sub);
     const userHolds = isCrypto ? holdsCrypto : holdsEquity;
     const assetClass = isCrypto ? 'crypto' : 'equity';
-    const allocation = isCrypto ? (p.crypto ?? 30) : (p.equity ?? 45);
+    const allocation = isCrypto ? (p.crypto ?? 14) : (p.equity ?? 24);
     const offlineNote = live ? '' : ' <span style="opacity:.5">(simulated)</span>';
 
     let tail = '';

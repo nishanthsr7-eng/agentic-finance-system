@@ -122,56 +122,63 @@
   <main class="faq-content">
     <header class="faq-header">
       <h1 class="faq-title">Questions. Resolved.</h1>
-      <p class="section-subtitle">Clarifying the mechanics of the FLUX financial architecture.</p>
+      <p class="section-subtitle">Quick answers about forecasts, accuracy and the demo.</p>
     </header>
 
     <div class="faq-list">
       <div class="faq-item">
-        <h3>How secure is FLUX really?</h3>
-        <p>FLUX utilizes end-to-end encryption with sovereign keys, meaning we never have access to your private data. Your assets are secured by the same protocols used by world-class security auditors.</p>
+        <h3>What is FLUX?</h3>
+        <p>An app that forecasts where 25+ cryptocurrencies and US stocks are likely to move over the next five days, and lets you practise on those forecasts with virtual money.</p>
       </div>
       <div class="faq-item">
-        <h3>Is FLUX a global platform?</h3>
-        <p>Yes. FLUX is a borderless financial ecosystem designed to operate across all major jurisdictions while maintaining local regulatory compliance via automated privacy shields.</p>
+        <h3>How are the predictions made?</h3>
+        <p>Every night, FLUX studies years of price history for each asset, estimates the chance it goes up or down over five days, and works out a likely price range.</p>
       </div>
       <div class="faq-item">
-        <h3>How fast are the transactions?</h3>
-        <p>Our infrastructure is built for high-frequency operations, with sub-millisecond settlement times across our proprietary sovereign network.</p>
+        <h3>Why is the accuracy only about 53%?</h3>
+        <p>Because nobody can reliably predict daily prices. FLUX gets the direction right a little over half the time and says so openly. Its strength is the price range, which holds about 8 times in 10. Apps claiming 80–90% are usually testing on data they've already seen.</p>
+      </div>
+      <div class="faq-item">
+        <h3>What does the news check do?</h3>
+        <p>It reads recent headlines for each asset. If the news points the other way, the forecast's confidence is lowered, and you can see why.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Is any of this real money or financial advice?</h3>
+        <p>No. All trades and payments are simulated, and nothing here is financial advice.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Can I try it without signing up?</h3>
+        <p>Yes. Tap "Use demo account" on the login page. It's shared with other visitors and refreshed regularly.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Why is the first load sometimes slow?</h3>
+        <p>The app sleeps when nobody is using it. The first visit after a quiet spell can take up to a minute.</p>
       </div>
     </div>
   </main>
 
   <footer class="footer">
     <div class="footer-bottom glass-pill">
-      <div class="nav-brand">FLUX</div>
-      <div class="footer-nav">
-        <a href="../index.html">Home</a>
+      <a href="../index.html" class="nav-brand">
+        <svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+        FLUX
+      </a>
+      <nav class="footer-nav" aria-label="Footer">
         <a href="about.html">About</a>
-        <a href="contact.html">Contact Us</a>
-      </div>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQs</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+      <nav class="footer-legal" aria-label="Legal">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
     </div>
+    <p class="footer-note">A personal project for learning and demonstration, not a real financial service. Brand names shown belong to their owners.</p>
   </footer>
   <script src="../js/flux-config.js"></script>
-  <script>
-    // FAQs served from MySQL via /db/faqs (static items above are the fallback).
-    (async () => {
-      const API = (window.FLUX_CONFIG && window.FLUX_CONFIG.apiBase) || 'http://localhost:8000';
-      try {
-        const res = await fetch(`${API}/db/faqs`);
-        if (!res.ok) throw new Error(res.status);
-        const { faqs } = await res.json();
-        if (!faqs || !faqs.length) return;
-        const list = document.querySelector('.faq-list');
-        if (!list) return;
-        list.innerHTML = faqs.map(f => {
-          const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-          return `<div class="faq-item"><h3>${esc(f.question)}</h3><p>${esc(f.answer)}</p></div>`;
-        }).join('');
-      } catch (e) {
-        console.warn('[FLUX] FAQ DB fetch failed — using static fallback:', e.message);
-      }
-    })();
-  </script>
 </body>
 
 </html>

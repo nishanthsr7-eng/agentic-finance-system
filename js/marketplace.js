@@ -28,7 +28,7 @@
     n = Number(n || 0);
     if (n >= 1000) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (n >= 1) return "$" + n.toFixed(2);
-    return "$" + n.toFixed(4);
+    return "$" + String(Number(n.toPrecision(4)));
   }
 
   // ── Market pool lookup ────────────────────────────────────────────────────────
@@ -323,7 +323,7 @@
       $("successHeading").textContent = `${order.side.toUpperCase()} FILLED`;
       $("successRef").textContent = "FLX-" + String(res.trade.id).padStart(6, "0");
       $("successAsset").textContent = order.name;
-      $("successFilled").textContent = `${fmtQty(res.trade.quantity)} @ ${fmtPrice(res.trade.price)} (server quote)`;
+      $("successFilled").textContent = `${fmtQty(res.trade.quantity)} @ ${fmtPrice(res.trade.price)}, the live market price`;
       $("successValue").textContent = fmtUSD(res.trade.amount);
       $("successCash").textContent = fmtUSD(res.wallet.cash_usd);
       toast("Order Filled", `${order.side.toUpperCase()} ${fmtQty(res.trade.quantity)} ${order.name} for ${fmtUSD(res.trade.amount)}.`, "price");

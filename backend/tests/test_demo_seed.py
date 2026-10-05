@@ -90,6 +90,15 @@ def test_trades_use_stored_closes_and_never_oversell(data):
     assert data["wallet_cash"] == pytest.approx(cash, abs=0.01)
 
 
+def test_at_most_one_trade_per_symbol_per_day():
+    for offset in range(60):  # many seeds, since the trade plan depends on the date
+        today = TODAY - timedelta(days=offset)
+        now = datetime(today.year, today.month, today.day, 21, 0)
+        trades = S.build_demo_rows(today, now, _closes(today))["trades"]
+        keys = [(sym, when.date()) for sym, _n, _side, _q, _p, _a, when in trades]
+        assert len(keys) == len(set(keys))
+
+
 def test_no_stored_closes_means_no_trades():
     data = S.build_demo_rows(TODAY, NOW, {})
     assert data["trades"] == []
@@ -189,3 +198,13 @@ def test_every_recent_day_has_spending():
             today - timedelta(days=k) for k in range(30) if today - timedelta(days=k) not in spent
         ]
         assert missing == []
+
+
+def test_allocation_matches_holdings_and_cash(data):
+    equity, crypto, cash, _goal = data["portfolio"]
+    assert equity + crypto + cash == 100
+    cost = {"equity": 0.0, "crypto": 0.0}
+    for _s, _n, kind, qty, avg, _c in data["holdings"]:
+        cost["crypto" if kind == "crypto" else "equity"] += qty * avg
+    cash_total = sum(a[2] for a in data["accounts"] if a[1] in ("savings", "wallet"))
+    assert crypto == round(cost["crypto"] / (sum(cost.values()) + cash_total) * 100)

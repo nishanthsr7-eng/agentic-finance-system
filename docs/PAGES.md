@@ -11,6 +11,10 @@ design-token system in `css/`, and behaviour by the ES modules in `js/`.
 The marketing entry point and product overview.
 
 - Hero section, feature highlights and navigation into the app.
+- A phone preview of the app with three screens (practice wallet, holdings and
+  a practice buy order), switched by the Forecast / Check / Practise control.
+- A compact footer shared by every public page: a demo call-to-action, then
+  About, Security, FAQs, Contact, Privacy and Terms.
 - Static page; driven by `js/main.js`.
 
 ## Dashboard - `pages/dashboard.html`
@@ -58,13 +62,17 @@ Charts, spending and strategy testing.
 The window into the prediction agent.
 
 - Chart of recent prices (live candles for BTC/ETH, 60 daily candles for the
-  rest) with the forecast range (`GET /predict/{symbol}/forecast`).
-- One verdict card: "BTC likely up over the next 5 days · 62% confidence", the
-  likely price range, suggested size, market regime, track record
-  (`/predict/{symbol}/history`), and the news check's verdict with its reason
-  (`/predict/{symbol}/verdict`; "Check now" re-runs `/predict/{symbol}/verify`).
-- "Other forecasts" for the remaining symbols (`/predict/leaderboard`,
-  `/predict/verdicts`).
+  rest) with the 5-day forecast drawn as a cone from the current price out to
+  the likely range on the target date (`GET /predict/{symbol}/forecast`).
+  Hovering the forecast zone shows the likely range for that day.
+- A summary above the chart: the call ("Likely up", "Likely down", or "Flat"
+  when the expected move is under 1%), the likely range, confidence, market
+  regime and the news check (`/predict/{symbol}/verdict`; "Check again"
+  re-runs `/predict/{symbol}/verify`), plus suggested size and track record
+  (`/predict/{symbol}/history`).
+- "All forecasts" table for every symbol (`/predict/leaderboard`,
+  `/predict/verdicts`). The selected symbol uses the same live range as the
+  summary.
 - Advisor chat (`/ai/chat/stream`).
 - Driven by `js/advisor.js` and `css/advisor.css`.
 
