@@ -37,8 +37,9 @@ _MIN_OBS = 250  # below this a GARCH fit is unreliable → use EWMA
 def _to_returns(series: pd.Series) -> pd.Series:
     """Coerce a price OR return series to clean log-returns (drops the leading NaN)."""
     s = pd.Series(series).astype(float)
-    # Heuristic: a price series is strictly positive and not tiny; a return series straddles 0.
-    if (s > 0).all() and s.mean() > 1.0:
+    # A price series is strictly positive; a return series straddles 0. No level check: coins
+    # priced under $1 (TRX, ADA, DOGE) are still prices.
+    if (s > 0).all():
         s = np.log(s / s.shift())
     return s.replace([np.inf, -np.inf], np.nan).dropna()
 

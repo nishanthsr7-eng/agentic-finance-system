@@ -323,7 +323,7 @@
       $("successHeading").textContent = `${order.side.toUpperCase()} FILLED`;
       $("successRef").textContent = "FLX-" + String(res.trade.id).padStart(6, "0");
       $("successAsset").textContent = order.name;
-      $("successFilled").textContent = `${fmtQty(res.trade.quantity)} @ ${fmtPrice(res.trade.price)}`;
+      $("successFilled").textContent = `${fmtQty(res.trade.quantity)} @ ${fmtPrice(res.trade.price)} (server quote)`;
       $("successValue").textContent = fmtUSD(res.trade.amount);
       $("successCash").textContent = fmtUSD(res.wallet.cash_usd);
       toast("Order Filled", `${order.side.toUpperCase()} ${fmtQty(res.trade.quantity)} ${order.name} for ${fmtUSD(res.trade.amount)}.`, "price");

@@ -11,11 +11,11 @@ Start
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import llm, log_redact
-from .auth import auth_router, ensure_auth_schema
+from .auth import auth_router, ensure_auth_schema, is_admin
 from .cache import cache
 from .config import settings
 from .db import init_db
@@ -132,7 +132,11 @@ for _r in (market, predict, ingestion, ai, backtest):
 # and FastAPI — unlike plain Starlette — does not register it alongside GET, so
 # a GET-only route answers 405 and the monitor reports the service as down.
 @app.api_route("/health", methods=["GET", "HEAD"])
-async def health():
+async def health(x_admin_token: str | None = Header(default=None)):
+    """Public: just liveness, so uptime checks stay fast and nothing internal leaks.
+    Scheduler jobs, configured keys and store stats need the admin token."""
+    if not is_admin(x_admin_token):
+        return {"status": "ok"}
     from .ingestion import get_status as ingestion_status
 
     sched_jobs = []
