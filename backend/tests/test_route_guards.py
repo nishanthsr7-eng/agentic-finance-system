@@ -95,7 +95,7 @@ def test_chat_rejects_oversized_history():
     assert client.post("/ai/chat", json=body, headers=_auth()).status_code == 422
 
 
-def test_forecast_recompute_limited_to_model_symbols():
+def test_forecastable_limited_to_model_symbols():
     syms = predict._model_symbols()
     assert "BTC" in syms and "AAPL" in syms
     assert "NOPE" not in syms

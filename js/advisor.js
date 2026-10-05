@@ -23,6 +23,7 @@
     lineMode: false,   // true when no candles (non-chartable symbol → forecast line)
     verdict: null,     // /predict/{sym}/verdict .verdict — latest verifier verdict, if any
     pointForecast: null, // /predict/{sym}/forecast .point_forecast — OOF skill of the point estimate
+    forecastable: true,  // /predict/{sym}/forecast .forecastable — symbol covered by the model
   };
 
   const $ = (id) => document.getElementById(id);
@@ -340,8 +341,9 @@
       state.prediction = d.prediction || null;
       state.series = d.series || [];
       state.pointForecast = d.point_forecast || null;
+      state.forecastable = d.forecastable !== false;
       return true;
-    } catch (e) { state.prediction = null; state.series = []; state.pointForecast = null; return false; }
+    } catch (e) { state.prediction = null; state.series = []; state.pointForecast = null; state.forecastable = true; return false; }
   }
 
   // Latest verifier verdict for the active symbol, if the daily cycle has logged one.
@@ -482,12 +484,30 @@
     return `<span class="vd-check-ic ${cls}">${icon}</span><span class="vd-check-txt" title="${escapeHtml(tip)}">${txt}.${why}</span>`;
   }
 
+  const STABLECOINS = new Set(['USDT', 'USDC', 'DAI']);
+
+  // When the stored forecast was made: forecasts are only refreshed by the daily job,
+  // so an older one is shown as is rather than recomputed on page load.
+  function asOf(p) {
+    if (!p.generated_at) return '';
+    const made = new Date(p.generated_at);
+    if (isNaN(made)) return '';
+    const hrs = (Date.now() - made.getTime()) / 36e5;
+    const when = made.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<div class="vd-asof${hrs > 36 ? ' stale' : ''}">Forecast made ${when}${hrs > 36 ? ' · next update after 00:30 UTC' : ''}</div>`;
+  }
+
   function renderVerdictCard() {
     const el = $('verdict');
     if (!el) return;
     const p = state.prediction, sym = escapeHtml(state.symbol);
     if (!p) {
-      el.innerHTML = `<div class="vd-head"><span class="vd-title">No forecast for ${sym} yet.</span></div>`;
+      const msg = STABLECOINS.has(state.symbol)
+        ? `${sym} is a stablecoin pegged to $1, so it isn't forecast.`
+        : state.forecastable === false
+          ? `${sym} isn't covered by the forecast model.`
+          : `No forecast for ${sym} yet. New forecasts are made daily at 00:30 UTC.`;
+      el.innerHTML = `<div class="vd-head"><span class="vd-title">${msg}</span></div>`;
       return;
     }
     const anchor = liveAnchor();
@@ -528,6 +548,7 @@
       </div>
       ${range ? `<div class="vd-range">${range}</div>${bar}` : ''}
       <div class="vd-facts">${facts.map(([k, v]) => `<div class="vd-fact"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+      ${asOf(p)}
       <div class="vd-check">${checkLine(state.verdict)}<button class="mini-btn" id="vf-btn"${_verifying ? ' disabled' : ''}>Check now</button></div>`;
     $('vf-btn').addEventListener('click', runVerifier);
     loadTrack(state.symbol);
@@ -552,7 +573,7 @@
 
   function renderLeaderboard() {
     const body = $('lb-body');
-    if (!_leaderboard.length) { body.innerHTML = `<div class="mini-empty">No agent calls logged yet.<br>Trigger predictions on the API to populate.</div>`; return; }
+    if (!_leaderboard.length) { body.innerHTML = `<div class="mini-empty">No forecasts yet.<br>New forecasts are made daily at 00:30 UTC.</div>`; return; }
     body.innerHTML = _leaderboard.map((r, i) => {
       const up = r.direction !== 'DOWN';
       const conf = r.confidence != null ? r.confidence : 0;
@@ -581,7 +602,7 @@
 
   async function initLeaderboard() {
     try {
-      const d = await getJSON(`${API}/predict/leaderboard?limit=12`);
+      const d = await getJSON(`${API}/predict/leaderboard?limit=50`);
       _leaderboard = d.leaderboard || [];
       $('lb-meta').textContent = `${_leaderboard.length} calls`;
     } catch (e) {

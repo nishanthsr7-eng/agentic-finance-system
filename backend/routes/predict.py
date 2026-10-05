@@ -1,10 +1,7 @@
 """Prediction agent: calibrated direction, conformal band, regime, verifier."""
 
-import asyncio
 import json
 import re
-import time
-from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -124,13 +121,6 @@ async def predict_symbol_history(symbol: str, limit: int = Query(100, ge=1, le=5
     }
 
 
-_forecast_locks: dict[str, asyncio.Lock] = {}
-
-
-def _forecast_lock(symbol: str) -> asyncio.Lock:
-    return _forecast_locks.setdefault(symbol, asyncio.Lock())
-
-
 @lru_cache(maxsize=1)
 def _point_forecast_quality() -> dict:
     """Out-of-fold point-forecast record of the shipped return model (model_meta.json)."""
@@ -204,36 +194,19 @@ async def predict_symbol_forecast(symbol: str, lookback: int = Query(60, ge=10, 
             )
         series.append(point)
 
-    # Reuse today's stored prediction if one exists (one fresh inference per symbol per day);
-    # only recompute when stale or missing, so dashboard reloads don't hammer the model.
+    # Serve the latest STORED prediction only, however old. Running the model here
+    # loads it into the web process on a page view, which on the 512 MB host was
+    # enough to get the instance killed; the 00:30 UTC job (or an admin trigger)
+    # writes fresh ones. The page shows the prediction's own date.
     stored = await get_latest_predictions(symbol, 1)
     pred = stored[0] if stored else None
-    today = datetime.now(timezone.utc).date()
-    is_fresh = (
-        pred
-        and pred.get("generated_at")
-        and datetime.fromtimestamp(pred["generated_at"] / 1000, tz=timezone.utc).date() == today
-    )
-    # Recompute only for symbols the model was trained on, and only one at a
-    # time per symbol: concurrent dashboard loads share a single inference.
-    lock = _forecast_lock(symbol)
-    if not is_fresh and symbol in _model_symbols() and not lock.locked():
-        async with lock:
-            try:
-                from ..prediction.serve import predict_and_log
-
-                fresh = await predict_and_log(symbol)
-                if fresh:
-                    fresh["generated_at"] = int(time.time() * 1000)
-                    pred = fresh
-            except Exception as exc:  # agent/model offline → fall back to stale/none
-                log.warning("forecast predict failed for %s: %s", symbol, exc)
 
     return {
         "symbol": symbol,
         "series": series,
         "count": len(series),
         "prediction": pred,
+        "forecastable": symbol in _model_symbols(),
         "point_forecast": _point_forecast_quality(),
         "timestamp": _now_iso(),
     }
