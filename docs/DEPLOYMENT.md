@@ -1,4 +1,4 @@
-# Deployment — free tier, end to end
+# Deployment - free tier, end to end
 
 FLUX deploys as four free pieces:
 
@@ -12,8 +12,8 @@ FLUX deploys as four free pieces:
 There is no paid step anywhere in this guide, and **no credit card is required
 at any point**. That constraint is what picked these four.
 
-This is the guide. For the deployment that actually exists — real URLs, the
-settings used, and the problems hit along the way — see
+This is the guide. For the deployment that actually exists - real URLs, the
+settings used, and the problems hit along the way - see
 [DEPLOYMENT_RECORD.md](DEPLOYMENT_RECORD.md).
 
 ## Why this split
@@ -24,7 +24,7 @@ alone is 445 MB. Nothing free and card-free holds that.
 
 Dropping torch brings the import cost to ~248 MB, and the app itself boots at
 ~120 MB because the prediction stack loads lazily. That fits Render's 512 MB
-with room to serve. So the deployed image is the slim build — see
+with room to serve. So the deployed image is the slim build - see
 [backend/requirements-slim.txt](../backend/requirements-slim.txt) for the exact
 set and what it trades away.
 
@@ -34,7 +34,7 @@ Two earlier choices are recorded here because they look obvious and are not:
   and Gradio Spaces moved behind PRO ($9/month) in July 2026 with no
   announcement; only Static Spaces remain free, which cannot serve FastAPI.
 * **Google Cloud Run** fits the full image comfortably at 2 GiB and stays
-  inside its always-free allowance for a demo — but enabling billing requires
+  inside its always-free allowance for a demo - but enabling billing requires
   a card even when the bill is zero. It is the right answer if you have one.
 
 The frontend is static, so it does not belong on the same host: Pages serves it
@@ -42,7 +42,7 @@ from the edge with no cold start, and the API can sleep without the site going
 down with it.
 
 Ollama is local-only. Nothing free will host a local LLM, so the deployed build
-talks to an OpenAI-compatible endpoint instead — see [backend/llm.py](../backend/llm.py).
+talks to an OpenAI-compatible endpoint instead - see [backend/llm.py](../backend/llm.py).
 
 ## What the slim build gives up
 
@@ -50,9 +50,9 @@ Three torch-dependent features, and nothing else:
 
 | Feature | Status on Render |
 |---|---|
-| FinBERT / CryptoBERT news sentiment | **replaced** — `SENTIMENT_BACKEND=llm` scores the same headlines with the chat model |
+| FinBERT / CryptoBERT news sentiment | **replaced** - `SENTIMENT_BACKEND=llm` scores the same headlines with the chat model |
 | LSTM magnitude head (`magnitude.py`) | unavailable |
-| Chronos zero-shot baseline (`baselines.py`) | unavailable — the ARIMA baseline still runs |
+| Chronos zero-shot baseline (`baselines.py`) | unavailable - the ARIMA baseline still runs |
 
 Everything else is intact: the XGBoost direction classifier and meta-model,
 conformal prediction bands, GARCH volatility, HMM regime detection, RAG and
@@ -67,11 +67,11 @@ aggregate mean, which is robust to that. See
 
 ---
 
-## 1. Database — TiDB Serverless
+## 1. Database - TiDB Serverless
 
 1. Create a cluster at <https://tidbcloud.com> (Serverless, free).
 2. **Connect → General**, and copy the host, port, user and password.
-3. Seed it from your machine — set these in `.env` first, then run the seeder:
+3. Seed it from your machine - set these in `.env` first, then run the seeder:
 
    ```
    MYSQL_HOST=gateway01.<region>.prod.aws.tidbcloud.com
@@ -83,25 +83,29 @@ aggregate mean, which is robust to that. See
    ```
 
    ```bash
-   python seed_mysql.py
+   python scripts/seed_mysql.py
    ```
 
 `MYSQL_SSL=true` is required: managed providers reject plaintext connections,
 and TiDB listens on 4000, not 3306.
 
-> Prefer no external database? The backend already has a SQLite path
-> (`DB_PATH`). Only the `/db/*` routes need MySQL.
+MySQL is required: users, logins and every `/db/*` route live there. SQLite
+(`DB_PATH`) holds only market data and predictions.
 
-## 2. LLM — Groq
+After seeding, optionally create a least-privilege app user with
+`scripts/db_app_user.sql` and use it for `MYSQL_USER` / `MYSQL_PASSWORD` on
+Render; backups are covered in [scripts/db_restore.md](../scripts/db_restore.md).
+
+## 2. LLM - Groq
 
 1. Create a key at <https://console.groq.com/keys>.
-2. Keep it for step 3; it goes in the Space's secrets, never in the repo.
+2. Keep it for step 3; it goes in Render's environment, never in the repo.
 
-Any OpenAI-compatible endpoint works — OpenRouter's `:free` models and
+Any OpenAI-compatible endpoint works - OpenRouter's `:free` models and
 Gemini's compatibility shim are both drop-in. Change `LLM_BASE_URL` and
 `LLM_MODEL` to switch.
 
-## 3. Backend — Render
+## 3. Backend - Render
 
 No CLI and no card. Render builds the Dockerfile straight from GitHub.
 
@@ -117,13 +121,19 @@ No CLI and no card. Render builds the Dockerfile straight from GitHub.
    | `MYSQL_HOST` | `gateway01.<region>.prod.aws.tidbcloud.com` |
    | `MYSQL_USER` | the long prefixed TiDB username |
    | `MYSQL_PASSWORD` | the TiDB password |
-   | `CORS_ORIGINS` | leave blank for now — step 4 fills it |
+   | `CORS_ORIGINS` | leave blank for now - step 4 fills it |
    | `FINNHUB_API_KEY`, `COINGECKO_API_KEY`, `ALPHA_VANTAGE_API_KEY`, `NEWSAPI_KEY`, `FRED_API_KEY` | from your `.env` |
 
    `AUTH_SECRET` is generated by Render; everything else is already in the
-   blueprint.
+   blueprint. After the first deploy, add these by hand under *Environment*:
 
-4. **Apply.** The first build takes ~5 minutes — much faster than the full
+   | Key | Value | Why |
+   |---|---|---|
+   | `ADMIN_TOKEN` | a long random string | Unlocks maintenance routes (manual triggers, `/db/health` details). Empty = they always answer 403 |
+   | `MYSQL_POOL_SIZE` | `4` | Reuses TiDB connections instead of a new TLS handshake per query |
+   | `MARKET_STORE` | `mysql` | Keeps predictions and price history in TiDB so they survive redeploys. Run `python scripts/copy_history_to_tidb.py` (then `--apply`) first |
+
+4. **Apply.** The first build takes ~5 minutes - much faster than the full
    image, because torch is not in it.
 
 5. Check `https://<service>.onrender.com/health`. It should report
@@ -132,31 +142,9 @@ No CLI and no card. Render builds the Dockerfile straight from GitHub.
 ### Keeping it warm
 
 The free plan spins a service down after 15 minutes idle, and the next visitor
-then waits 30–60 s. The plan also allows 750 instance-hours per month and a
-month is 730 hours, so one service can stay up continuously and still fit.
-
-**Use an external uptime monitor.** UptimeRobot's free tier checks every 5
-minutes with no card required — point an HTTP(s) monitor at
-`https://<service>.onrender.com/health`. It holds the instance open and tells
-you about genuine downtime as well.
-
-`/health` answers both GET and HEAD, which matters because monitors default to
-HEAD and changing that is often a paid feature.
-
-[.github/workflows/keep-warm.yml](../.github/workflows/keep-warm.yml) does the
-same job on a 10-minute cron and works as a backup — add a repository
-**variable** (not a secret — it is a public URL) named `FLUX_API_URL` set to
-your service URL, under *Settings → Secrets and variables → Actions →
-Variables*. Do not rely on it alone: GitHub queues scheduled workflows on
-shared runners and they drift, sometimes by hours, and GitHub disables
-scheduled workflows entirely after 60 days without a commit.
-
-A Cloudflare Worker cron trigger ([keep-warm-worker/](../keep-warm-worker/))
-is the third option and now the best of the three: it is version-controlled, it
-logs every run, and it sends GET. It did not fire at all when first deployed —
-see [DEPLOYMENT_RECORD.md](DEPLOYMENT_RECORD.md) — but it has been firing
-reliably since 2026-09-18. If you deploy it, turn on `[observability]` in
-`wrangler.toml`: without logs a silent cron and a broken one look identical.
+then waits about 50 s. A Cloudflare Worker cron (`keep-warm-worker/`) pings
+`/health` every 10 minutes, with an UptimeRobot monitor as a second layer.
+Setup, verification and troubleshooting are in [KEEP_WARM.md](KEEP_WARM.md).
 
 This only fits if `flux-api` is the **only** service in the Render workspace.
 A second free service pushes the pair past 750 hours and both get suspended for
@@ -177,7 +165,7 @@ quota is the binding constraint here, not compute.
 | `INSIGHT_INTERVAL_MIN` | 60 | LLM insight cycle, chained to the market cycle |
 
 `INGESTION_INTERVAL_MIN` was previously read from the environment but never
-used — the scheduler had 5/30/15 hardcoded, so setting it to 30 changed
+used - the scheduler had 5/30/15 hardcoded, so setting it to 30 changed
 nothing and NewsAPI's quota still went early. All four keys are honoured now.
 
 ### Keep the heavy jobs off the boot path
@@ -187,14 +175,16 @@ optional. The prediction cycle, the options snapshot and the drift retrain
 otherwise each get a one-off run a few minutes after every boot, on top of a
 process already holding FastAPI, pandas and the ONNX embedder. If one of those
 runs is what exhausts the memory, the OOM kill restarts the service, which
-schedules the run again — a crash loop rather than a single bad cycle.
+schedules the run again - a crash loop rather than a single bad cycle.
 
 With it false, the cron triggers (00:20, 00:30, Sun 02:00 UTC) are untouched
 and you can still run a cycle by hand:
 
 ```bash
-curl -X POST https://<service>.onrender.com/ingestion/trigger/predictions
+curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" https://<service>.onrender.com/ingestion/trigger/predictions
 ```
+
+The demo reseed is light, so it still runs once about 4 minutes after boot.
 
 ### If you have more RAM available
 
@@ -202,7 +192,7 @@ The same Dockerfile builds the full image with `--build-arg FULL=1`, which
 restores FinBERT, the LSTM magnitude head and the Chronos baseline. Set
 `SENTIMENT_BACKEND=auto` alongside it. It needs ~1 GB.
 
-## 4. Frontend — Cloudflare Pages
+## 4. Frontend - Cloudflare Pages
 
 1. Edit **`js/flux-config.js`** and set `PRODUCTION_API` to your Render URL:
 
@@ -210,9 +200,9 @@ restores FinBERT, the LSTM magnitude head and the Chronos baseline. Set
    var PRODUCTION_API = 'https://flux-api.onrender.com';
    ```
 
-2. Edit **`pages/analysis.html`** and replace `https://CHANGE-ME.onrender.com` in
-   the `connect-src` of its CSP with the same URL. That page has a
-   Content-Security-Policy, so the browser blocks the API regardless of what
+2. Edit **`pages/analysis.html`** and put the same URL in the `connect-src` of
+   its CSP (it names `https://flux-api-vono.onrender.com` today). That page has
+   a Content-Security-Policy, so the browser blocks the API regardless of what
    the config resolves to unless the origin is named there.
 
 3. Commit and push both.
@@ -234,10 +224,10 @@ restores FinBERT, the LSTM magnitude head and the Chronos baseline. Set
 
    Render redeploys automatically when an env var changes.
 
-The build copies an allowlist into `dist/` — see
+The build copies an allowlist into `dist/` - see
 [scripts/build-static.mjs](../scripts/build-static.mjs). Pages serves its
 output directory verbatim, so pointing it at the repo root would publish
-`backend/*.py` and `seed_mysql.py` as downloadable files.
+`backend/*.py` and `scripts/seed_mysql.py` as downloadable files.
 
 ---
 
@@ -249,14 +239,15 @@ output directory verbatim, so pointing it at the repo root would publish
   Two things keep it inside the budget: `HEAVY_JOBS_ON_STARTUP=false` (above),
   and the embedder being baked into the Docker image, so its 80 MB download and
   tar extraction happen on the builder rather than in a near-full container.
-  If it still OOMs, set `RAG_ENABLED=false` — a dashboard env-var flip, no
+  If it still OOMs, set `RAG_ENABLED=false` - a dashboard env-var flip, no
   redeploy. That drops ChromaDB, onnxruntime and the embedder from the process;
   RAG-backed chat context and semantic search degrade and nothing else changes.
 - **Free services spin down after 15 minutes idle** unless the keep-warm
   workflow is running. The URL stays live either way; a cold visitor just waits.
-- **The disk is ephemeral.** SQLite ingestion history and the Chroma vector
-  store reset on every deploy and every spin-down. Anything that must survive
-  belongs in MySQL.
+- **The disk is ephemeral.** SQLite ingestion history, stored predictions and
+  the Chroma vector store reset on every deploy and every spin-down, which is
+  why the Advisor says "No forecast yet" after a redeploy until `MARKET_STORE`
+  is `mysql`. Anything that must survive belongs in MySQL.
 - **The API is world-reachable.** That is what the static frontend needs, so
   keep `AUTH_REQUIRED=true` and treat every route as publicly callable.
 - **Market-data quotas are the real ceiling**, not compute. Tune
@@ -273,14 +264,18 @@ curl https://<service>.onrender.com/health
 
 Check in the response:
 
-- `"agent": {"available": true, "provider": "openai"}` — the LLM key is live.
+- `"agent": {"available": true, "provider": "openai"}` - the LLM key is live.
   This also confirms sentiment scoring works, since it uses the same client.
-- `"scheduler": {"running": true}` — ingestion is up.
-- `"keys"` — each market-data provider that is configured.
+- `"scheduler": {"running": true}` - ingestion is up.
+- `"keys"` - each market-data provider that is configured.
 
-Then open the Pages URL and confirm the browser console is clean. A
-`CHANGE-ME` error there means step 4.1 was missed; a CORS error means the
-service's `CORS_ORIGINS` does not list the Pages domain.
+Then open the Pages URL, click "Use demo account", and confirm the browser
+console is clean. A `CHANGE-ME` error means step 4.1 was missed; a CORS or CSP
+error means `CORS_ORIGINS` or the analysis page's `connect-src` does not list
+the right domain.
 
-The first load after an idle period is slow by design — see *Keeping it warm*.
+In the Render log, expect "APScheduler started — 10 jobs registered" and, a few
+minutes after boot, "demo reseed ok".
+
+The first load after an idle period is slow by design - see *Keeping it warm*.
 The static site appears immediately either way; only the data panels wait.

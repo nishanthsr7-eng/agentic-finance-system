@@ -6,8 +6,10 @@
 
 </div>
 
+<p align="center"><b><a href="https://nishanth-flux.pages.dev">Live demo: nishanth-flux.pages.dev</a></b></p>
+
 <p align="center">
-  <img src="docs/screenshots/landing.png" alt="Agentic AI Finance & Stock Prediction System landing page" width="100%">
+  <img src="docs/demo.webp" alt="Tour of the demo account: Dashboard, Smart Advisor, Analysis, Marketplace order ticket and Payments" width="100%">
 </p>
 
 ---
@@ -27,7 +29,7 @@ prediction cockpit, or register your own from the sign-up page:
 Frontend on Cloudflare Pages, API on Render, MySQL on TiDB Serverless.
 
 > The API runs on a free instance. If it has been idle, the first request may
-> take up to a minute to wake it — the dashboard fills in once it responds.
+> take up to a minute to wake it - the dashboard fills in once it responds.
 
 ---
 
@@ -37,12 +39,43 @@ stock/crypto trend-prediction agent into a single web application.
 The platform is built around an **honesty contract**: the prediction engine is
 engineered to be measurably better out-of-sample than a typical tutorial
 pipeline by *refusing to leak the future into training* and by *quantifying its
-own uncertainty correctly* — not by promising impossible accuracy.
+own uncertainty correctly* - not by promising impossible accuracy.
 
 In practice that means purged, embargoed walk-forward cross-validation;
 triple-barrier labeling; fractional differentiation tuned by ADF test;
 probability calibration; GARCH-shaped conformal prediction bands; and an LLM
 verifier with veto power over the model's own call.
+
+## What it does
+
+- **Forecasts 5-day direction** for about 30 crypto assets and US stocks, with a
+  calibrated confidence and 80% / 90% price ranges that cover what they claim.
+- **Checks every call against the news:** an LLM reads recent headlines and can
+  lower the confidence or veto the call, and the page says why.
+- **Keeps score in public:** every forecast is stored and graded when it
+  matures, so the Advisor shows a real track record, not a backtest.
+- **Paper trading** with a virtual wallet; the server sets the fill price and
+  locks the wallet row, so the client can't trade at a made-up price.
+- **Personal finance dashboard:** accounts, spending, recurring payments and a
+  portfolio view, on a demo dataset that rolls forward every day.
+
+---
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["Market data<br/>yfinance history, CoinGecko,<br/>Finnhub, NewsAPI headlines"] --> B["Feature pipeline<br/>42 causal features,<br/>fractional differencing"]
+    B --> C["XGBoost direction model<br/>triple-barrier labels,<br/>purged walk-forward CV"]
+    C --> D["Calibration + conformal<br/>isotonic probabilities,<br/>80% / 90% return bands"]
+    D --> E["LLM verifier (Groq)<br/>can veto the call"]
+    E --> F["FastAPI on Render<br/>free, 512 MB"]
+    F <--> G[("TiDB Serverless<br/>MySQL")]
+    F <--> S[("SQLite + ChromaDB<br/>on the instance")]
+    P["Cloudflare Pages<br/>static frontend"] -->|HTTPS| F
+    W["Cloudflare Worker<br/>keep-warm cron"] -->|"GET /health every 10 min"| F
+    F --> H["MCP server<br/>tools for AI agents"]
+```
 
 ---
 
@@ -58,8 +91,8 @@ Out-of-fold numbers from purged, embargoed walk-forward cross-validation:
 | Model | Accuracy | AUC |
 |---|---|---|
 | FLUX-X (XGBoost) | 0.528 | 0.522 |
-| Always-up baseline | **0.531** | — |
-| Persistence (tomorrow = today) | 0.496 | — |
+| Always-up baseline | **0.531** | - |
+| Persistence (tomorrow = today) | 0.496 | - |
 
 - **Accuracy:** the model does not beat always-up. Markets drift up, so 53% of
   the labels are UP.
@@ -85,45 +118,49 @@ Out-of-fold numbers from purged, embargoed walk-forward cross-validation:
 
 ---
 
-## Screenshots
+## How the prediction agent works
 
-### Smart Advisor — the prediction cockpit
+- **Purged, embargoed walk-forward CV:** training rows whose labels overlap the
+  test window are dropped, plus a gap after it, so no future price leaks in.
+- **Triple-barrier labels:** each row is labelled by which comes first: a profit
+  target, a stop, or a time limit, scaled to that asset's volatility.
+- **Fractional differencing:** prices are differenced just enough to pass an ADF
+  stationarity test, keeping as much memory of the level as possible.
+- **Calibration:** isotonic regression maps raw scores to probabilities; it is
+  evaluated only on folds it was not fitted on.
+- **Conformal ranges:** 80% and 90% return bands, scaled by GARCH volatility,
+  that cover 80.0% and 90.0% out of sample.
+- **LLM verifier:** a separate model reads the news and can agree, downgrade or
+  veto the call; its verdict is stored next to the forecast.
 
-The agent's directional call, calibrated confidence, Kelly-sized position, and
-the 5-day outlook: the 80% and 90% price ranges re-based to the live price,
-with a live range hit rate. The
-conviction board ranks every tracked asset; **Model Trust** plots stated
-confidence against realized hit rate.
+---
 
-![Smart Advisor](docs/screenshots/advisor.png)
+## Runs on free tiers
 
-### Dashboard — portfolio overview
+The whole stack runs without a payment method on file:
+Cloudflare Pages (frontend), Render free (API: 512 MB, 0.1 CPU), TiDB Serverless
+(MySQL), Groq (LLM) and a Cloudflare Worker that pings `/health` every 10
+minutes so the API doesn't sleep.
 
-Live briefing on the day's top mover, portfolio value, asset allocation, and
-cashflow — all backed by the seeded MySQL dataset scoped to the signed-in user.
+512 MB shaped the design. PyTorch alone is 445 MB, so the deployed API uses an
+LLM for sentiment instead of FinBERT, ships pre-trained models instead of
+training on the server, and boots at about 120 MB. The full story, including
+what broke on the way, is in [docs/DEPLOYMENT_RECORD.md](docs/DEPLOYMENT_RECORD.md).
 
-![Dashboard](docs/screenshots/dashboard.png)
+---
 
-### Analysis — live charting and cashflow intelligence
+## Pages
 
-Real-time candlestick charting across timeframes, spending breakdown, and the
-live paper-trading ledger.
-
-![Analysis](docs/screenshots/analysis.png)
-
-### Marketplace — live crypto and equity screener
-
-Streaming quotes, sparklines, market caps, and a headline ticker fed by the
-background ingestion scheduler.
-
-![Marketplace](docs/screenshots/marketplace.png)
-
-### Payments — unified payment hub
-
-Multi-account payment routing, QR flows, recurring settlements, contact
-transfers, and a discretionary-spending headroom meter.
-
-![Payments](docs/screenshots/payments.png)
+- **Dashboard:** daily briefing on the top mover, portfolio value, asset
+  allocation and cashflow, from the signed-in user's own data.
+- **Smart Advisor:** one verdict per asset ("BTC likely up over the next 5 days
+  · 62% confidence"), the 80% price range, suggested size, track record, and the
+  news check that can lower or veto the call. Other assets' forecasts below.
+- **Analysis:** live candles, a spending heatmap, the paper-trade ledger and a
+  strategy backtester.
+- **Marketplace:** live crypto and stock quotes, a per-asset chart with RSI and
+  MACD, and a paper-trading ticket; the server sets the fill price.
+- **Payments:** accounts, contacts, recurring payments and a spending meter.
 
 ---
 
@@ -133,12 +170,13 @@ transfers, and a discretionary-spending headroom meter.
 |---|---|
 | [docs/SETUP.md](docs/SETUP.md) | Full local installation and run instructions |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deploy the full stack on free tiers |
+| [docs/KEEP_WARM.md](docs/KEEP_WARM.md) | How the free-tier API is kept awake, and how to check it |
 | [docs/DEPLOYMENT_RECORD.md](docs/DEPLOYMENT_RECORD.md) | What is deployed, where, and the problems hit getting there |
 | [docs/FEATURES.md](docs/FEATURES.md) | Complete feature catalogue |
 | [docs/PAGES.md](docs/PAGES.md) | Every frontend page and what it does |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, modules, data flow |
-| [docs/API_KEYS.md](docs/API_KEYS.md) | How to obtain every API key |
-| [docs/DATASETS.md](docs/DATASETS.md) | How to download every training dataset |
+| [docs/API_KEYS.md](docs/API_KEYS.md) | Every API key and setting, and what breaks without it |
+| [docs/DATASETS.md](docs/DATASETS.md) | Training datasets, and which ones the served model uses |
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Backend HTTP endpoint reference |
 | [docs/AGENT_TRAINING.md](docs/AGENT_TRAINING.md) | How the prediction agent is trained |
 
@@ -146,34 +184,24 @@ transfers, and a discretionary-spending headroom meter.
 
 ## Technology Stack
 
-**Frontend**
-- HTML5, vanilla CSS (design-token system), vanilla JavaScript (ES modules)
-- `live-server` for local development on port 3000
+| Layer | Production (live demo) | Local development |
+|---|---|---|
+| Frontend | Static HTML, CSS design tokens, vanilla JS on Cloudflare Pages | `live-server` on port 3000 |
+| API | FastAPI + Uvicorn in Docker on Render (free tier) | `uvicorn --reload` on port 8000 |
+| Background jobs | APScheduler; a Cloudflare Worker keeps the API warm | APScheduler |
+| Database | TiDB Serverless (MySQL-compatible, TLS) via `pymysql` | Local MySQL, SQLite (`aiosqlite`) for the market store |
+| LLM (insights, verifier, sentiment) | Groq through an OpenAI-compatible client (`backend/llm.py`) | Ollama with a local model, or any OpenAI-compatible endpoint |
+| Retrieval | ChromaDB vector store | ChromaDB |
 
-**Backend**
-- Python 3.10+
-- FastAPI + Uvicorn (ASGI web framework and server)
-- APScheduler (`AsyncIOScheduler`) for background ingestion and prediction jobs
-- `httpx` async HTTP client; `yfinance` for market data
+**Prediction agent:** XGBoost, scikit-learn (calibration, linear base learners),
+`hmmlearn` (regime HMM), `arch` (GARCH(1,1)), `statsmodels` (ADF test, ARIMA
+baseline), plus in-house fractional differencing, triple-barrier labelling,
+purged walk-forward CV and conformal bands. PyTorch (FinBERT, CryptoBERT, the
+LSTM magnitude head, Chronos) is optional research tooling that the deployed
+build does not install.
 
-**Persistence**
-- SQLite via `aiosqlite` (live market data, predictions, outcomes)
-- MySQL via `pymysql` (seeded application dataset for user-facing pages)
-- ChromaDB (vector store for Retrieval-Augmented Generation)
-
-**Machine Learning / Prediction Agent**
-- XGBoost (gradient-boosted direction classifier)
-- scikit-learn (calibration, metrics, linear base learners)
-- `hmmlearn` (Gaussian HMM regime detection)
-- `arch` (GARCH(1,1) volatility), `statsmodels` (ADF test, ARIMA baseline)
-- `transformers` + `torch` (FinBERT / CryptoBERT sentiment)
-- `chronos-forecasting` (zero-shot foundation-model baseline)
-- In-house fractional differentiation, triple-barrier labeling, purged
-  walk-forward cross-validation, and conformal prediction bands
-
-**LLM Reasoning Layer**
-- Ollama serving a local model (`aura`) for explanation and the verifier/veto layer
-- Optional hosted-LLM API upgrade for stronger reasoning
+**Tooling:** GitHub Actions (pytest, Ruff, Docker smoke test, static build
+check), Docker, Render Blueprint (`render.yaml`).
 
 ---
 
@@ -183,39 +211,45 @@ transfers, and a discretionary-spending headroom meter.
 # 1. Frontend dependencies
 npm install
 
-# 2. Backend dependencies (use a virtual environment)
-pip install -r backend/requirements.txt
+# 2. Backend dependencies (use a virtual environment); what production runs
+pip install -r backend/requirements-slim.txt
 
-# 3. Configure secrets — copy the template and fill in your keys
+# 3. Configure secrets - copy the template, set MySQL and any keys you have
 cp .env.example .env          # Windows:  copy .env.example .env
 
-# 4. Start the backend API (port 8000)
+# 4. Create and seed the MySQL database (includes the demo user)
+python scripts/seed_mysql.py
+
+# 5. Start the backend API (port 8000)
 npm run api                   # or: uvicorn backend.main:app --reload --port 8000
 
-# 5. Start the frontend (port 3000) in a second terminal
+# 6. Start the frontend (port 3000) in a second terminal
 npm run dev
 ```
 
-Open <http://localhost:3000>. The backend health probe is at
-<http://localhost:8000/health>.
+Open <http://localhost:3000> and click "Use demo account". The backend health
+probe is at <http://localhost:8000/health>.
 
-Every key in `.env.example` is optional — FLUX degrades gracefully, and a
-missing key disables only the feature that needs it. For the complete
-walkthrough, including MySQL seeding, Ollama setup, dataset download, and model
-training, see [docs/SETUP.md](docs/SETUP.md).
+MySQL is required; every API key is optional - a missing key disables only the
+feature that needs it. The trained models are committed, so forecasts work
+without training. For the full walkthrough, see [docs/SETUP.md](docs/SETUP.md).
 
 ---
 
 ## Tests
 
-The prediction agent ships with unit suites covering feature engineering,
-leakage guards, the ensemble, and portfolio construction:
+Two suites: the prediction agent (feature engineering, leakage guards, the
+ensemble, portfolio construction) and the API (auth guards, trading, rate
+limiting, migrations, MySQL pool; the database and network are faked).
 
 ```bash
 pytest backend/prediction -q
+pytest backend/tests -q
 ```
 
-CI runs these on Python 3.10 and 3.12 on every push and pull request.
+CI runs the prediction suite on Python 3.10 and 3.12 and the API suite against
+the locked slim requirements the Docker image uses, plus Ruff, a Docker
+`/health` smoke test and a static-build check, on every push and pull request.
 
 ---
 
@@ -238,12 +272,26 @@ CI runs these on Python 3.10 and 3.12 on every push and pull request.
 │   ├── trading_api.py      # Paper trading, watchlist, alerts
 │   ├── payments_api.py     # Payments page writes
 │   └── prediction/         # The machine-learning prediction agent
-├── scripts/                # Dataset download + training/eval gate scripts
-├── Dataset/                # Staged training datasets (downloaded locally)
+├── scripts/                # Seeding, dataset download, DB tools
+│   └── experiments/        # Research gates: each feature had to pass these
+├── Dataset/                # Training datasets (created locally, not committed)
 ├── ai_engine/              # Ollama model files
 ├── mcp/                    # Model Context Protocol server
 └── docs/                   # This documentation set
 ```
+
+---
+
+## Limitations and next steps
+
+- **Daily direction is close to a coin flip.** The model doesn't beat always-up
+  on raw accuracy; its value is in the confident subset and the honest ranges.
+- **The regime-switching ensemble is off:** it no longer beats the plain model
+  out of sample, so serving skips it until it does.
+- **Free-tier cold starts:** if the keep-warm ping misses, the first request can
+  take up to a minute.
+- **Models are trained offline** and committed; retraining is a manual step.
+- **Next:** an edge cache for public quotes, so prices load during a cold start.
 
 ---
 
@@ -252,7 +300,7 @@ CI runs these on Python 3.10 and 3.12 on every push and pull request.
 FLUX is a research and educational platform. The prediction agent produces
 *calibrated decision support*, not financial advice or an oracle. All trading
 functionality is **paper trading only**; the system never executes live trades
-or moves real money. Markets are near-efficient — realistic directional
+or moves real money. Markets are near-efficient - realistic directional
 accuracy on daily bars has a hard ceiling. Do not risk capital based on this
 software.
 

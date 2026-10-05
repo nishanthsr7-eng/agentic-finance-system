@@ -5,7 +5,7 @@
  * to copy the frontend into dist/ and leave everything else behind.
  *
  * That separation is the point. Pages serves its output directory verbatim, so
- * pointing it at the repo root would publish backend/*.py, seed_mysql.py and
+ * pointing it at the repo root would publish backend/*.py, scripts/seed_mysql.py and
  * the training scripts as downloadable static files. Copying an explicit
  * allowlist means a new top-level file is never published by accident.
  *

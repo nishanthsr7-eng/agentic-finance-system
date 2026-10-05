@@ -11,10 +11,10 @@ GATE-2 OUTCOME — AUC fails, but the deployable SHARPE *helps* (an AUC-vs-Sharp
 mirror image of FRED). Read before changing the default:
   • AUC gate FAILS. On the identical pooled sample/splits the full block lowers crypto-subset OOF AUC
     (0.5209 -> 0.5036); the best greedy subset {btc_lead_lag, dvol_level} reaches only +0.0055 < the
-    +0.01 target. (scripts/gate2_crypto_features_ablation.py, scripts/gate2_crypto_features_subset_selection.py)
+    +0.01 target. (scripts/experiments/gate2_crypto_features_ablation.py, scripts/experiments/gate2_crypto_features_subset_selection.py)
   • DEPLOYABLE SHARPE HELPS. On the crypto-only long-only book the block lifts Sharpe consistently:
     top-33% 1.04->1.14, top-20% 0.97->1.07, top-10% 0.67->0.89 (+0.10..+0.22); only long/short dips
-    slightly (-0.02). (scripts/gate2_crypto_features_sharpe_ablation.py, 416 rebalances)
+    slightly (-0.02). (scripts/experiments/gate2_crypto_features_sharpe_ablation.py, 416 rebalances)
   • WHY they disagree: global pooled AUC mixes cross-date + cross-symbol (and equity) pairs and barely
     moves, but the crypto-only portfolio only needs better WITHIN-DATE ranking among crypto names —
     which the per-symbol funding/OI/DVOL/btc-beta columns sharpen. (Unlike FRED, whose features were
@@ -23,11 +23,11 @@ mirror image of FRED). Read before changing the default:
     mixed 33-symbol book: deployable long-only Sharpe 0.835 -> 0.670 (every config down, regime-gated
     -0.335). The pooled model is SHARED and equity events outnumber crypto ~2.7:1, so 14 columns that
     are zero on equities + noisy on crypto shift the shared fit and degrade the dominant equity
-    rankings. (scripts/gate2_crypto_features_sharpe_full_universe.py)
+    rankings. (scripts/experiments/gate2_crypto_features_sharpe_full_universe.py)
 DECISION (final): default OFF (``FLUX_CRYPTO_FEATURES=1`` to opt in). The locked full-universe model
 is production and the block regresses it, so it stays OFF there. It IS a net positive on a CRYPTO-ONLY
 book — enable the flag if/when a separate crypto book is run, or revisit as a regime/sizing-layer input
-(Phase 6). The module is leak-safe & tested. See the four scripts/gate2_crypto_features_* scripts.
+(Phase 6). The module is leak-safe & tested. See the four scripts/experiments/gate2_crypto_features_* scripts.
 
 Same contract / honesty discipline as ``options.py`` and ``fred.py``:
   • LEAK-SAFE. Every value on row ``D`` is finalised by the end of UTC day ``D`` (end-of-day OI,

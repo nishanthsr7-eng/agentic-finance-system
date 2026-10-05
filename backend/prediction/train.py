@@ -87,7 +87,7 @@ async def build_macro() -> pd.DataFrame:
     m = m.fillna(0)  # Handle small seeded datasets where rolling windows would be entirely NaN
 
     # FRED macro block (term/credit spread, rates, CPI YoY) — SELF-GATED OFF for the cross-sectional
-    # ranker. Phase-1 finding (scripts/gate1_fred_macro_sharpe_ablation.py): macro is cross-sectionally CONSTANT
+    # ranker. Phase-1 finding (scripts/experiments/gate1_fred_macro_sharpe_ablation.py): macro is cross-sectionally CONSTANT
     # (term_spread is identical for every symbol on a day), so it adds no within-date ranking power but
     # injects common-mode noise that HALVES the deployable portfolio Sharpe (0.906 -> 0.457) despite a
     # tiny +AUC. It passes the AUC-only GATE-1 but fails the deployable metric, so per the honesty
@@ -140,7 +140,7 @@ async def load_dataset(symbols: list[str] | None = None):
     # z, accruals) — point-in-time from SEC filings (datasources/sec_fundamentals.py). Like the crypto
     # block it returns finite, neutral-(0)-filled columns for EVERY symbol (all-zero for crypto / any
     # symbol without SEC fundamentals), so the dropna() below never drops a row on their account; signal
-    # lives only on the equity subset. SELF-GATED OFF: GATE-4 (scripts/gate4_equity_fundamentals_eval.py) FAILS —
+    # lives only on the equity subset. SELF-GATED OFF: GATE-4 (scripts/experiments/gate4_equity_fundamentals_eval.py) FAILS —
     # on the identical pooled panel the equity-subset OOF AUC is a within-noise tie vs Phase-3
     # (0.5107 -> 0.5099, -0.0008), no structural lift. Quarterly fundamentals are slowly-varying step
     # functions with little directional power at the 5-day horizon, so per the honesty contract this
@@ -155,7 +155,7 @@ async def load_dataset(symbols: list[str] | None = None):
     # point-in-time). Like the crypto/equity blocks it returns finite, neutral-(0)-filled columns for
     # EVERY symbol (all-zero wherever a stream has no coverage), so the dropna() below never drops a row
     # on its account; signal lives only where news history exists. SELF-GATED OFF — flip
-    # FLUX_SENTIMENT_FEATURES=1 to opt in / run GATE-5 (scripts/gate5_sentiment_eval.py). The live FinBERT/
+    # FLUX_SENTIMENT_FEATURES=1 to opt in / run GATE-5 (scripts/experiments/gate5_sentiment_eval.py). The live FinBERT/
     # CryptoBERT tilt in predict.py is independent of this and unaffected. Leak-safe + tested
     # (test_sentiment_features.py).
     sentiment_on = os.getenv("FLUX_SENTIMENT_FEATURES", "0") == "1"

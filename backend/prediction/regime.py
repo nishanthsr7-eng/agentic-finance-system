@@ -148,7 +148,9 @@ async def current_regime(force: bool = False) -> dict:
         now = time.monotonic()
         if not force and _regime_cache is not None and (now - _regime_cache_ts) < _REGIME_TTL:
             return _regime_cache
-        df = await decode_regimes(persist=True)
+        # Serving keeps the fit in memory only: hmm.pkl is a tracked training artifact, and
+        # writing it here rewrote the repo copy on every local API run.
+        df = await decode_regimes(persist=False)
         last = df.iloc[-1]
         probs = {n: float(last[f"p_{n}"]) for n in STATES}
         _regime_cache = {

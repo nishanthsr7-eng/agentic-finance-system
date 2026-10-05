@@ -14,6 +14,10 @@ from .common import log
 router = APIRouter()
 
 
+class BacktestDataError(ValueError):
+    """Not enough price data for the request. The message is ours and safe to show."""
+
+
 # ── Backtesting (yfinance SMA crossover) ─────────────────────────────────────
 
 
@@ -49,9 +53,9 @@ def _run_backtest_sync(
         if len(df) > long_sma:
             break
     if df.empty:
-        raise ValueError(f"No data for {yf_sym} in range {start}–{end}")
+        raise BacktestDataError(f"No data for {yf_sym} in range {start}–{end}")
     if len(df) <= long_sma:
-        raise ValueError(f"Only {len(df)} days of {yf_sym} data; SMA({long_sma}) needs more")
+        raise BacktestDataError(f"Only {len(df)} days of {yf_sym} data; SMA({long_sma}) needs more")
 
     # yfinance returns MultiIndex columns (field, ticker) even for a single
     # symbol — flatten so df["Close"]/row["Close"] etc. are plain scalars.
@@ -185,8 +189,8 @@ async def run_backtest(body: BacktestRequest):
             body.initial_capital,
         )
         return result
-    except ValueError as e:
+    except BacktestDataError as e:
         raise HTTPException(404, str(e)) from e
     except Exception as e:
         log.error("Backtest failed: %s", e)
-        raise HTTPException(502, f"Backtest error: {e}") from e
+        raise HTTPException(502, "Backtest failed. Try another symbol or date range.") from e

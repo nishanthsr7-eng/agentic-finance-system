@@ -27,6 +27,10 @@ from .user_api import db_router
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
+# httpx logs every request URL at INFO, and Finnhub/NewsAPI take the API key as a
+# query parameter, so those lines would put the keys in the Render logs.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 log = logging.getLogger("flux.api")
 
 
@@ -90,7 +94,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],  # DELETE: watchlist + alerts
-    allow_headers=["*"],
+    # Only what the frontend sends, plus the admin header for manual triggers.
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Token"],
     expose_headers=["Retry-After"],  # lets the frontend read 429 back-off
 )
 
