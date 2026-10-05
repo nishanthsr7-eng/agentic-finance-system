@@ -29,7 +29,8 @@
 
       const isToday  = t => new Date(t.date).toDateString() === now.toDateString();
       const isMonth  = t => { const d = new Date(t.date); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); };
-      const isPrevMo = t => { const d = new Date(t.date); return d.getFullYear() === prev.getFullYear() && d.getMonth() === prev.getMonth(); };
+      // Same days of last month as have passed this month, so month-to-date is compared like-for-like.
+      const isPrevMo = t => { const d = new Date(t.date); return d.getFullYear() === prev.getFullYear() && d.getMonth() === prev.getMonth() && d.getDate() <= now.getDate(); };
       const isYear   = t => new Date(t.date) >= yrAgo;
       // Prior rolling-365d window so the year % compares like-for-like periods.
       const isPrevYr = t => { const d = new Date(t.date); return d >= twoYrAgo && d < yrAgo; };
@@ -92,8 +93,8 @@
     const liveChgEl   = document.getElementById('live-chg');
 
     const ASSETS = {
-      btc:   { name: 'BTC / CRYPTO',  icon: '₿', desc: 'Sovereign Digital Asset',   fmtPrefix: '$',  fmtLocale: 'en-US' },
-      eth:   { name: 'ETH / CRYPTO',  icon: 'Ξ', desc: 'Smart Contract Utility',    fmtPrefix: '$',  fmtLocale: 'en-US' },
+      btc:   { name: 'BTC / CRYPTO',  icon: '₿', desc: 'Bitcoin · USD price',       fmtPrefix: '$',  fmtLocale: 'en-US' },
+      eth:   { name: 'ETH / CRYPTO',  icon: 'Ξ', desc: 'Ethereum · USD price',      fmtPrefix: '$',  fmtLocale: 'en-US' },
     };
 
     function fmtPrice(val) {

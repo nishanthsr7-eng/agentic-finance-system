@@ -197,13 +197,16 @@ async def market_summary():
     if stocks is None and settings.FINNHUB_API_KEY:
         try:
             stocks = await _fetch_stocks_live()
-            cache.set("stocks", stocks, ttl=settings.STOCKS_TTL)
+            if stocks:
+                cache.set("stocks", stocks, ttl=settings.STOCKS_TTL)
         except Exception:
             stocks = []
     stocks = stocks or []
 
-    top_crypto = sorted(crypto, key=lambda a: a.get("market_cap", 0), reverse=True)[:2]
+    by_cap = sorted(crypto, key=lambda a: a.get("market_cap", 0), reverse=True)
     top_stocks = sorted(stocks, key=lambda a: abs(a.get("change_pct", 0)), reverse=True)[:2]
+    # Always four cards: when stock quotes are unavailable, the next cryptos fill the gap.
+    top_crypto = by_cap[: 4 - len(top_stocks)]
 
     def _strip(a: dict, category: str) -> dict:
         return {
@@ -309,7 +312,9 @@ async def quotes_stocks():
         log.error("Finnhub fetch failed: %s", e)
         raise HTTPException(502, "Finnhub unreachable") from e
 
-    cache.set("stocks", assets, ttl=settings.STOCKS_TTL)
+    # Don't cache an empty sweep (bad key, rate limit), so the next request retries.
+    if assets:
+        cache.set("stocks", assets, ttl=settings.STOCKS_TTL)
     return _wrap(assets, "finnhub_live", cached=False)
 
 
@@ -481,10 +486,10 @@ def _fetch_candles_sync(yf_symbol: str, period: str, interval: str) -> list[dict
         candles.append(
             {
                 "t": int(ts.timestamp() * 1000),
-                "o": round(float(row["Open"]), 4),
-                "h": round(float(row["High"]), 4),
-                "l": round(float(row["Low"]), 4),
-                "c": round(float(row["Close"]), 4),
+                "o": float(f"{float(row['Open']):.6g}"),
+                "h": float(f"{float(row['High']):.6g}"),
+                "l": float(f"{float(row['Low']):.6g}"),
+                "c": float(f"{float(row['Close']):.6g}"),
                 "v": int(row.get("Volume", 0) or 0),
             }
         )

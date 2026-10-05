@@ -45,6 +45,11 @@ DRIFT_K = 0.5  # how far the risk band leans toward the called side per σ of ed
 # small by design so the symmetric conformal coverage stays valid
 
 
+def _sig(x: float, digits: int = 6) -> float:
+    """Round to significant figures, so sub-cent prices keep their precision."""
+    return float(f"{x:.{digits}g}")
+
+
 def _load():
     global \
         _model, \
@@ -231,13 +236,13 @@ async def predict(
             pred_return = (2.0 * prob_up - 1.0) * float(scale) * DRIFT_K
             band_kind = "risk_band"  # center is a lean, not a point forecast
         ret_lo, ret_hi = _bands.interval(pred_return, scale, alpha=BAND_ALPHA)
-        pred_price = round(last_close * (1 + pred_return), 4)
-        conf_low = round(last_close * (1 + ret_lo), 4)
-        conf_high = round(last_close * (1 + ret_hi), 4)
+        pred_price = _sig(last_close * (1 + pred_return))
+        conf_low = _sig(last_close * (1 + ret_lo))
+        conf_high = _sig(last_close * (1 + ret_hi))
         if WIDE_ALPHA in _bands.q:  # older conformal.pkl may lack it
             w_lo, w_hi = _bands.interval(pred_return, scale, alpha=WIDE_ALPHA)
-            conf_low_90 = round(last_close * (1 + w_lo), 4)
-            conf_high_90 = round(last_close * (1 + w_hi), 4)
+            conf_low_90 = _sig(last_close * (1 + w_lo))
+            conf_high_90 = _sig(last_close * (1 + w_hi))
         band_cov = round(_bands.coverage.get(BAND_ALPHA, float("nan")), 4)
         pred_return = round(pred_return, 6)
 

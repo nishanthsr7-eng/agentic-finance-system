@@ -99,22 +99,22 @@ def _refresh_quote_pool(asset_type: str) -> None:
     """Refill an expired crypto/stocks quote cache from upstream.
 
     Called from a sync route (FastAPI runs those in a worker thread), so the
-    async fetchers run on the main event loop via anyio. Imported lazily:
-    main.py imports this module."""
-    from . import main
+    async fetchers run on the main event loop via anyio. Imported lazily to
+    avoid an import cycle with the routers."""
     from .config import settings
+    from .routes import market
 
     try:
         if asset_type == "crypto":
             if cache.get("crypto") is None:
                 cache.set(
                     "crypto",
-                    anyio.from_thread.run(main._fetch_crypto_live),
+                    anyio.from_thread.run(market._fetch_crypto_live),
                     ttl=settings.CRYPTO_TTL,
                 )
         elif cache.get("stocks") is None and settings.FINNHUB_API_KEY:
             cache.set(
-                "stocks", anyio.from_thread.run(main._fetch_stocks_live), ttl=settings.STOCKS_TTL
+                "stocks", anyio.from_thread.run(market._fetch_stocks_live), ttl=settings.STOCKS_TTL
             )
     except Exception as e:  # upstream down: caller treats it as "no price"
         log.warning("quote refresh for %s failed: %s", asset_type, e)

@@ -306,10 +306,10 @@ def _fetch_ohlcv_sync() -> list[dict]:
                     {
                         "symbol": label,
                         "date": str(ts.date()),
-                        "open": round(float(row["Open"]), 4),
-                        "high": round(float(row["High"]), 4),
-                        "low": round(float(row["Low"]), 4),
-                        "close": round(float(row["Close"]), 4),
+                        "open": float(f"{float(row['Open']):.6g}"),
+                        "high": float(f"{float(row['High']):.6g}"),
+                        "low": float(f"{float(row['Low']):.6g}"),
+                        "close": float(f"{float(row['Close']):.6g}"),
                         "volume": int(row.get("Volume", 0) or 0),
                     }
                 )

@@ -90,7 +90,7 @@ function fmtPrice(val, category) {
   if (category === "forex") return n.toFixed(4);
   if (n >= 1000) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (n >= 1)    return "$" + n.toFixed(2);
-  return "$" + n.toFixed(4);
+  return "$" + String(Number(n.toPrecision(4)));
 }
 
 function renderSparkline(prices) {
@@ -323,13 +323,17 @@ async function updateMarketOverview() {
 
   // Fallback: derive locally if the endpoint is unavailable (still deterministic)
   if (highlights.length < 4) {
-    const crypto = marketPool.crypto.slice().sort((a,b) => (b.market_cap||0) - (a.market_cap||0)).slice(0, 2);
     const stocks = marketPool.stocks.slice().sort((a,b) => Math.abs(b.change_pct||0) - Math.abs(a.change_pct||0)).slice(0, 2);
-    highlights = [
+    const crypto = marketPool.crypto.slice().sort((a,b) => (b.market_cap||0) - (a.market_cap||0)).slice(0, 4 - stocks.length);
+    const local = [
       ...crypto.map(a => ({...a, category: 'crypto'})),
       ...stocks.map(a => ({...a, category: 'stocks'})),
     ];
+    if (local.length > highlights.length) highlights = local;
   }
+
+  // Cards with no asset to show are hidden rather than left on "Loading...".
+  cards.forEach((card, i) => { card.style.display = highlights[i] ? '' : 'none'; });
 
   highlights.forEach((asset, i) => {
     const card = cards[i];

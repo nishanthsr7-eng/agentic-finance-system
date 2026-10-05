@@ -32,7 +32,8 @@
   function fmtPrice(v) {
     if (v == null || !isFinite(v)) return '—';
     const a = Math.abs(v);
-    const dp = a >= 1000 ? 0 : a >= 1 ? 2 : 4;
+    if (a > 0 && a < 1) return (v < 0 ? '−' : '') + String(Number(a.toPrecision(4)));
+    const dp = a >= 1000 ? 0 : 2;
     return (v < 0 ? '−' : '') + a.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
   }
   function fmtPct(v, dp = 2) {
@@ -135,9 +136,13 @@
     const range0 = (hi - lo) || (hi || 1);
     lo -= range0 * 0.06; hi += range0 * 0.06;
     if (fc) { [fc.projected, anchor].forEach(v => { lo = Math.min(lo, v); hi = Math.max(hi, v); }); }
-
-    // The price range is shown in the 5-day outlook panel below the chart, not as a cone:
-    // it is often far wider than recent price action and would crush the price line.
+    // Widen the axis toward the likely range, but by at most half a price-span each way so the
+    // candles stay readable; any part of the cone beyond that is clipped and its edge labelled.
+    if (fc && fc.bandLow != null) {
+      const span = hi - lo;
+      lo = Math.min(lo, Math.max(fc.bandLow, lo - span * 0.5));
+      hi = Math.max(hi, Math.min(fc.bandHigh, hi + span * 0.5));
+    }
     const range = hi - lo || 1;
     const py = v => PAD.t + ph - ((v - lo) / range) * ph;
     const N = src.length;
@@ -186,6 +191,15 @@
       out += `<rect x="${xNow.toFixed(1)}" y="${PAD.t}" width="${(xEnd - xNow).toFixed(1)}" height="${ph.toFixed(1)}" fill="rgba(255,255,255,.015)"/>`;
       // now divider
       out += `<line x1="${xNow.toFixed(1)}" y1="${PAD.t}" x2="${xNow.toFixed(1)}" y2="${(PAD.t + ph).toFixed(1)}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="2 3"/>`;
+      // likely range as a cone: zero width now, the full range on the target date
+      if (fc.bandLow != null && fc.bandHigh > fc.bandLow) {
+        const top = PAD.t, bot = PAD.t + ph, clampY = y => Math.max(top, Math.min(bot, y));
+        const yHi = clampY(py(fc.bandHigh)), yLo = clampY(py(fc.bandLow));
+        out += `<defs><clipPath id="fc-clip"><rect x="${xNow.toFixed(1)}" y="${top}" width="${(xEnd - xNow).toFixed(1)}" height="${ph.toFixed(1)}"/></clipPath></defs>`;
+        out += `<path clip-path="url(#fc-clip)" d="M ${xNow.toFixed(1)},${yA.toFixed(1)} L ${xEnd.toFixed(1)},${py(fc.bandHigh).toFixed(1)} L ${xEnd.toFixed(1)},${py(fc.bandLow).toFixed(1)} Z" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.16)" stroke-width="1"/>`;
+        const edge = (y, v, above) => `<text x="${(xEnd - 4).toFixed(1)}" y="${(above ? y - 5 : y + 12).toFixed(1)}" fill="rgba(255,255,255,.45)" font-size="8.5" font-family="'JetBrains Mono',monospace" text-anchor="end">${fmtPrice(v)}</text>`;
+        out += edge(yHi, fc.bandHigh, false) + edge(yLo, fc.bandLow, true);
+      }
       // flat current-price reference across the zone
       out += `<line x1="${xNow.toFixed(1)}" y1="${yA.toFixed(1)}" x2="${xEnd.toFixed(1)}" y2="${yA.toFixed(1)}" stroke="rgba(255,255,255,.22)" stroke-width="1" stroke-dasharray="1 4"/>`;
       // projection (dotted, glowing)
@@ -259,6 +273,7 @@
       priceVal = g.anchor + (g.fc.projected - g.anchor) * frac;
       const tgt = g.prediction && g.prediction.target_date ? fmtDate(g.prediction.target_date) : '';
       label = tgt ? `Forecast → ${tgt}` : 'Forecast';
+      if (g.fc.bandLow != null) label += ` · likely ${fmtPrice(g.anchor + (g.fc.bandLow - g.anchor) * frac)} – ${fmtPrice(g.anchor + (g.fc.bandHigh - g.anchor) * frac)}`;
       col = g.fc.up ? 'up' : 'down';
     }
     const dotY = g.py(priceVal);
@@ -467,34 +482,23 @@
     if (sym === state.symbol) renderVerdictCard();
   }
 
-  // The second check (an LLM reading recent news) as one line: it can only
-  // lower the model's confidence or veto the call, never raise it.
-  function checkLine(v) {
-    if (_verifying) return `<span class="vd-check-txt">Checking against recent news…</span>`;
-    if (!v || !v.label || v.verifier === 'unavailable' || v.verifier === 'parse_error') {
-      return `<span class="vd-check-txt">Not checked against the news yet.</span>`;
-    }
-    const veto = v.label === 'VETO' || v.veto;
-    const agree = !veto && (v.label === 'agree' || v.agree);
-    const [cls, icon, txt] = veto ? ['veto', ICON.veto, 'News check: <b>vetoed</b> this forecast']
-      : agree ? ['agree', ICON.agree, 'News check: <b>agrees</b>']
-      : ['downgrade', ICON.down, `News check: lowered confidence to <b>${v.final_confidence}%</b>`];
-    const why = v.rationale ? ` <span class="vd-why">${escapeHtml(v.rationale)}</span>` : '';
-    const tip = [v.rationale, v.risks && `Main risk: ${v.risks}`].filter(Boolean).join(' — ');
-    return `<span class="vd-check-ic ${cls}">${icon}</span><span class="vd-check-txt" title="${escapeHtml(tip)}">${txt}.${why}</span>`;
+  const STABLECOINS = new Set(['USDT', 'USDC', 'DAI']);
+  const FLAT_PCT = 1; // expected moves smaller than this read as "Flat"
+
+  // Confidence as a word, so nobody has to interpret "56%".
+  function strength(conf) {
+    if (conf == null) return ['—', ''];
+    return conf >= 70 ? ['Strong', 'strong'] : conf >= 55 ? ['Moderate', 'moderate'] : ['Weak', 'weak'];
   }
 
-  const STABLECOINS = new Set(['USDT', 'USDC', 'DAI']);
-
-  // When the stored forecast was made: forecasts are only refreshed by the daily job,
-  // so an older one is shown as is rather than recomputed on page load.
-  function asOf(p) {
-    if (!p.generated_at) return '';
-    const made = new Date(p.generated_at);
-    if (isNaN(made)) return '';
-    const hrs = (Date.now() - made.getTime()) / 36e5;
-    const when = made.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    return `<div class="vd-asof${hrs > 36 ? ' stale' : ''}">Forecast made ${when}${hrs > 36 ? ' · next update after 00:30 UTC' : ''}</div>`;
+  // News check as a short status for its tile; the reason sits in the tooltip.
+  function newsStatus(v) {
+    if (_verifying) return ['Checking…', '', ''];
+    if (!v || !v.label || v.verifier === 'unavailable' || v.verifier === 'parse_error') return ['Not checked', '', ''];
+    const tip = [v.rationale, v.risks && `Main risk: ${v.risks}`].filter(Boolean).join(' — ');
+    if (v.label === 'VETO' || v.veto) return ['Vetoed', 'down', tip];
+    if (v.label === 'agree' || v.agree) return ['Agrees', 'up', tip];
+    return [`Lowered to ${v.final_confidence}%`, '', tip];
   }
 
   function renderVerdictCard() {
@@ -506,8 +510,8 @@
         ? `${sym} is a stablecoin pegged to $1, so it isn't forecast.`
         : state.forecastable === false
           ? `${sym} isn't covered by the forecast model.`
-          : `No forecast for ${sym} yet. New forecasts are made daily at 00:30 UTC.`;
-      el.innerHTML = `<div class="vd-head"><span class="vd-title">${msg}</span></div>`;
+          : `No forecast for ${sym} yet. New forecasts are made every night.`;
+      el.innerHTML = `<div class="vd-empty">${msg}</div>`;
       return;
     }
     const anchor = liveAnchor();
@@ -516,42 +520,45 @@
     const days = p.horizon_days || 5;
     const conf = state.verdict && state.verdict.final_confidence != null && state.verdict.label !== 'agree'
       ? state.verdict.final_confidence : p.confidence;
-
-    const range = fc && p.conf_low != null
-      ? `Likely between <b>${fmtPrice(fc.bandLow)}</b> and <b>${fmtPrice(fc.bandHigh)}</b> by ${fmtDate(p.target_date)}`
-      : '';
-    let bar = '';
-    if (fc && anchor && fc.bandHigh > fc.bandLow) {
-      const pad = (fc.bandHigh - fc.bandLow) * 0.25, lo = fc.bandLow - pad, span = fc.bandHigh + pad - lo;
-      const pos = v => Math.max(0, Math.min(100, (v - lo) / span * 100)).toFixed(1);
-      bar = `<div class="vd-bar"><span class="vd-bar-in" style="left:${pos(fc.bandLow)}%;right:${(100 - pos(fc.bandHigh)).toFixed(1)}%"></span><span class="vd-bar-now" style="left:${pos(anchor)}%" title="Now ${fmtPrice(anchor)}"></span></div>`;
-    }
-
+    const [word, cls] = strength(conf);
     const vetoed = !!(state.verdict && state.verdict.label === 'VETO');
-    const size = vetoed ? 'Stay out (vetoed by news check)'
-      : p.act && p.kelly_frac != null ? `${(p.kelly_frac * 100).toFixed(1)}% of portfolio`
-      : 'Stay out (signal too weak)';
+    const [news, newsCls, newsTip] = newsStatus(state.verdict);
+
+    // The headline follows the expected move, so a +0.2% call reads "Flat", not "Likely up".
+    const move = fc ? fc.deltaPct : null;
+    const flat = move != null && Math.abs(move) < FLAT_PCT;
+    const callCls = vetoed ? 'down' : flat ? 'flat' : up ? 'up' : 'down';
+    const callTxt = vetoed ? 'Vetoed by news' : flat ? 'Flat' : up ? 'Likely up' : 'Likely down';
+    const moveTxt = move != null && !vetoed ? `<span class="vd-move">${move >= 0 ? '+' : ''}${move.toFixed(1)}%</span>` : '';
+    const range = fc && p.conf_low != null
+      ? `<p class="vd-range">Likely between <b>${fmtPrice(fc.bandLow)}</b> and <b>${fmtPrice(fc.bandHigh)}</b> by ${fmtDate(p.target_date)}</p>` : '';
+    const regime = REGIME[p.regime] || (p.regime ? p.regime[0].toUpperCase() + p.regime.slice(1) : '');
+
+    // Secondary details as one muted line.
     const t = _track[state.symbol];
-    const facts = [
-      ['Suggested size', size],
-      ['Market', REGIME[p.regime] || (p.regime ? p.regime[0].toUpperCase() + p.regime.slice(1) : '—')],
-      ['Track record', t ? `Right ${t.acc}% of ${t.n} past calls` : 'Not enough past calls yet'],
-    ];
+    const made = p.generated_at ? new Date(p.generated_at) : null;
+    const stale = made && (Date.now() - made.getTime()) / 36e5 > 36;
+    const meta = [
+      made && !isNaN(made) ? `<span class="${stale ? 'stale' : ''}">Made ${made.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>` : '',
+      vetoed || !(p.act && p.kelly_frac != null) ? 'Suggested: stay out' : `Suggested: ${(p.kelly_frac * 100).toFixed(1)}% of portfolio`,
+      t ? `Right ${t.acc}% of ${t.n} past calls` : '',
+      'For practice only, not financial advice',
+    ].filter(Boolean).join(' · ');
 
     el.innerHTML = `
-      <div class="vd-head">
-        <span class="vd-dir ${up ? 'up' : 'down'}">${up ? ICON.up : ICON.dn}</span>
-        <span class="vd-title">${vetoed
-          ? `${sym}: model says <b class="${up ? 'up' : 'down'}">${up ? 'up' : 'down'}</b>, but the news check vetoed it`
-          : `${sym} likely <b class="${up ? 'up' : 'down'}">${up ? 'up' : 'down'}</b> over the next ${days} days`}</span>
-        <span class="vd-conf">${conf}% confidence</span>
-      </div>
-      ${range ? `<div class="vd-range">${range}</div>${bar}` : ''}
-      <div class="vd-facts">${facts.map(([k, v]) => `<div class="vd-fact"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
-      ${asOf(p)}
-      <div class="vd-check">${checkLine(state.verdict)}<button class="mini-btn" id="vf-btn"${_verifying ? ' disabled' : ''}>Check now</button></div>`;
+      <div class="vd-kicker">${sym} · next ${days} days</div>
+      <div class="vd-call ${callCls}">${callTxt}${moveTxt}</div>
+      ${range}
+      <p class="vd-facts-line">
+        <span>${word} confidence (${conf}%)</span>
+        ${regime ? `<span>${regime} market</span>` : ''}
+        <span title="${escapeHtml(newsTip)}">News: <b class="${newsCls === 'down' ? 'down' : ''}">${news}</b></span>
+        <button class="vd-link" id="vf-btn"${_verifying ? ' disabled' : ''}>Check again</button>
+      </p>
+      <div class="vd-meta">${meta}</div>`;
     $('vf-btn').addEventListener('click', runVerifier);
     loadTrack(state.symbol);
+    if (_leaderboard.length) renderLeaderboard();
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -573,38 +580,47 @@
 
   function renderLeaderboard() {
     const body = $('lb-body');
-    if (!_leaderboard.length) { body.innerHTML = `<div class="mini-empty">No forecasts yet.<br>New forecasts are made daily at 00:30 UTC.</div>`; return; }
-    body.innerHTML = _leaderboard.map((r, i) => {
-      const up = r.direction !== 'DOWN';
-      const conf = r.confidence != null ? r.confidence : 0;
-      const chartable = !!CHARTABLE[r.symbol];
+    if (!_leaderboard.length) { body.innerHTML = `<div class="mini-empty">No forecasts yet. New forecasts are made every night.</div>`; return; }
+    // The active symbol uses the same live-rebased range as the summary above it.
+    const activeFc = state.prediction ? rebasedForecast(liveAnchor()) : null;
+    body.innerHTML =
+    _leaderboard.map(r => {
       const v = _verdicts[r.symbol];
-      let badge = '<span class="lb-verdict"></span>';
-      if (v && v.label === 'VETO') badge = `<span class="lb-verdict veto" title="News check vetoed this (confidence → ${v.final_confidence}%): ${escapeHtml(v.rationale || '')}">${ICON.veto}</span>`;
-      else if (v && v.label === 'downgrade') badge = `<span class="lb-verdict downgrade" title="News check lowered confidence to ${v.final_confidence}%: ${escapeHtml(v.rationale || '')}">${ICON.down}</span>`;
-      return `<div class="lb-row${r.symbol === state.symbol ? ' active' : ''}" data-sym="${r.symbol}" title="${chartable ? 'Live chart' : 'Forecast (no live candles)'}">
-        <span class="lb-rank">${i + 1}</span>
-        <span class="lb-sym">${r.symbol}</span>
-        <span class="lb-dir${up ? '' : ' down'}">${up ? ICON.up : ICON.dn}</span>
-        <span class="lb-bar-wrap"><span class="lb-bar" style="width:${conf}%"></span></span>
-        <span class="lb-conf">${conf}%</span>
-        ${badge}
-      </div>`;
+      const vetoed = v && v.label === 'VETO';
+      const conf = v && v.final_confidence != null && v.label !== 'agree' ? v.final_confidence : r.confidence;
+      const [word] = strength(conf);
+      const live = r.symbol === state.symbol && activeFc;
+      const lo = live ? activeFc.bandLow : r.conf_low, hi = live ? activeFc.bandHigh : r.conf_high;
+      const move = live ? activeFc.deltaPct : (r.pred_return != null ? r.pred_return * 100 : null);
+      const flat = move != null && Math.abs(move) < FLAT_PCT;
+      const dir = vetoed ? 'veto' : flat ? 'flat' : r.direction !== 'DOWN' ? 'up' : 'down';
+      const glyph = { veto: '×', flat: '→', up: '↑', down: '↓' }[dir];
+      const range = lo != null && hi != null ? `${fmtPrice(lo)} – ${fmtPrice(hi)}` : '—';
+      const tip = vetoed ? `News check vetoed this: ${v.rationale || ''}` : '';
+      return `<button class="fc-row${r.symbol === state.symbol ? ' active' : ''}" data-sym="${r.symbol}" title="${escapeHtml(tip)}">
+        <span class="fc-dir ${dir}">${glyph}</span>
+        <span class="fc-sym">${r.symbol}</span>
+        <span class="fc-range">${range}</span>
+        <span class="fc-conf${vetoed ? ' down' : ''}">${vetoed ? 'Vetoed' : `${word} · ${conf}%`}</span>
+      </button>`;
     }).join('');
-    body.querySelectorAll('.lb-row').forEach(row => {
-      row.addEventListener('click', () => setSymbol(row.dataset.sym));
+    body.querySelectorAll('.fc-row[data-sym]').forEach(card => {
+      card.addEventListener('click', () => {
+        setSymbol(card.dataset.sym);
+        document.querySelector('.chart-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     });
   }
 
   function markLeaderboardActive() {
-    document.querySelectorAll('.lb-row').forEach(r => r.classList.toggle('active', r.dataset.sym === state.symbol));
+    document.querySelectorAll('.fc-row[data-sym]').forEach(r => r.classList.toggle('active', r.dataset.sym === state.symbol));
   }
 
   async function initLeaderboard() {
     try {
       const d = await getJSON(`${API}/predict/leaderboard?limit=50`);
       _leaderboard = d.leaderboard || [];
-      $('lb-meta').textContent = `${_leaderboard.length} calls`;
+      $('lb-meta').textContent = `${_leaderboard.length} assets` + (_leaderboard[0] && _leaderboard[0].target_date ? ` · ranges by ${fmtDate(_leaderboard[0].target_date)}` : '');
     } catch (e) {
       _leaderboard = [];
       $('lb-meta').textContent = 'offline';

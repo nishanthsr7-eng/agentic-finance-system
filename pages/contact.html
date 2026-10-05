@@ -198,12 +198,12 @@
 
   <header class="contact-hero">
     <h1 class="contact-title">Let's connect.</h1>
-    <p class="contact-lead">Have questions or want to partner with us? Our team is always here to help.</p>
+    <p class="contact-lead">Questions or feedback? This form is part of the demo and doesn't send messages yet.</p>
   </header>
 
   <section class="grid-contact">
     <div class="contact-form-card">
-      <form action="#">
+      <form id="contactForm" novalidate>
         <div class="form-group">
           <label class="form-label">Full Name</label>
           <input type="text" class="form-input" placeholder="Enter your name">
@@ -221,6 +221,7 @@
           <textarea class="form-input" placeholder="Tell us more about your inquiry..."></textarea>
         </div>
         <button type="submit" class="contact-submit-btn">Send Message</button>
+        <p id="contactNote" role="status" style="display:none;margin-top:14px;font-size:13px;opacity:.75;">Thanks! This form is a demo: nothing was sent or stored.</p>
       </form>
     </div>
 
@@ -233,8 +234,8 @@
           </svg>
         </div>
         <div>
-          <h4>Email Inquiries</h4>
-          <p>Support: help@flux.com</p>
+          <h4>Who's behind FLUX</h4>
+          <p>FLUX is designed and built by Nishanth S as a personal project.</p>
         </div>
       </div>
       <div class="info-card">
@@ -246,38 +247,45 @@
           </svg>
         </div>
         <div>
-          <h4>Global Presence</h4>
-          <p>San Francisco, CA<br>Bangalore, IND</p>
+          <h4>Quickest way in</h4>
+          <p>Skip the form and open the demo account from the <a href="login.html" style="color:var(--accent-teal)">login page</a>.</p>
         </div>
       </div>
     </div>
   </section>
 
   <footer class="footer">
-    <div class="footer-top">
-      <div class="cta-box">
-        <h2 class="serif-title">Experience the<br>FLUX difference.</h2>
-        <a href="signin.html" class="pill-btn outline-teal">Get Started</a>
-      </div>
-      <div class="footer-links">
-        <div class="link-col">
-          <h4>Company</h4>
-          <a href="about.html">About</a>
-          <a href="security.html">Security</a>
-          <a href="brand.html">Brand Guidelines</a>
-          <a href="careers.html">Careers</a>
-          <a href="faq.html">FAQs</a>
-        </div>
-        <div class="link-col">
-          <h4>Legal Information</h4>
-          <a href="privacy.html">Privacy Policy</a>
-          <a href="terms.html">Terms of Service</a>
-          <a href="cookies.html">Cookies Policy</a>
-          <a href="shield.html">Privacy Shield</a>
-        </div>
-      </div>
+    <div class="footer-cta animate-on-scroll">
+      <h2 class="serif-title">Ready to take a look?</h2>
+      <a href="login.html" class="pill-btn outline-teal">Try the live demo</a>
     </div>
+    <div class="footer-bottom glass-pill">
+      <a href="../index.html" class="nav-brand">
+        <svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+        FLUX
+      </a>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="about.html">About</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQs</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+      <nav class="footer-legal" aria-label="Legal">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
+    </div>
+    <p class="footer-note">A personal project for learning and demonstration, not a real financial service. Brand names shown belong to their owners.</p>
   </footer>
+  <script>
+    document.getElementById('contactForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      e.target.reset();
+      document.getElementById('contactNote').style.display = 'block';
+    });
+  </script>
 </body>
 
 </html>
