@@ -1,5 +1,6 @@
 """Chat roles are restricted, errors don't echo internals, CORS lists its headers,
-and /db/health only shows row counts to the admin.
+/db/health only shows row counts to the admin, and /health and /ingestion/status
+keep internals behind the admin token.
 
 Uses TestClient without the lifespan, so no scheduler, DB or model loads.
 """
@@ -99,3 +100,12 @@ def test_db_health_admin_gets_counts(monkeypatch):
     monkeypatch.setattr(user_api, "is_admin", lambda tok: tok == "t0k")
     r = client.get("/db/health", headers={"X-Admin-Token": "t0k"})
     assert r.json()["counts"]["users"] == 3
+
+
+def test_health_public_is_minimal():
+    assert client.get("/health").json() == {"status": "ok"}
+    assert client.head("/health").status_code == 200
+
+
+def test_ingestion_status_needs_admin():
+    assert client.get("/ingestion/status").status_code in (401, 403)

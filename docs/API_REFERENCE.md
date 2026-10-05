@@ -16,7 +16,7 @@ var; with `ADMIN_TOKEN` unset these always answer 403.
 
 | Method | Path | Description |
 |---|---|---|
-| GET, HEAD | `/health` | Liveness plus cache, scheduler, Chroma, ingestion, LLM provider, and which API keys are set (never the keys) |
+| GET, HEAD | `/health` | Liveness: `{"status":"ok"}`. With `X-Admin-Token`, also cache, scheduler, Chroma, ingestion, LLM provider, and which API keys are set (never the keys) |
 | POST | `/cache/flush` 🛠 | Invalidate the crypto/stock quote caches |
 
 ## Live Market Data
@@ -43,7 +43,7 @@ var; with `ADMIN_TOKEN` unset these always answer 403.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/ingestion/status` | Scheduler status and per-job last-run metadata |
+| GET | `/ingestion/status` | Scheduler status and per-job last-run metadata (admin: `X-Admin-Token`) |
 | POST | `/ingestion/trigger/{job}` 🛠 | Trigger a job: `crypto`, `stocks`, `ohlcv`, `news`, `market`, `insights`, `predictions` |
 
 ## Prediction Agent

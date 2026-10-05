@@ -14,7 +14,7 @@ from .common import _insight_job, _now_iso, log
 router = APIRouter()
 
 
-@router.get("/ingestion/status")
+@router.get("/ingestion/status", dependencies=[Depends(require_admin)])
 async def ingestion_status_endpoint():
     """Scheduler status and per-job last-run metadata."""
     from ..ingestion import get_status

@@ -136,8 +136,8 @@ No CLI and no card. Render builds the Dockerfile straight from GitHub.
 4. **Apply.** The first build takes ~5 minutes - much faster than the full
    image, because torch is not in it.
 
-5. Check `https://<service>.onrender.com/health`. It should report
-   `"provider": "openai"`, your model, and `"scheduler": {"running": true}`.
+5. Check `https://<service>.onrender.com/health` with the `X-Admin-Token` header. It should
+   report `"provider": "openai"`, your model, and `"scheduler": {"running": true}`.
 
 ### Keeping it warm
 
@@ -260,6 +260,12 @@ output directory verbatim, so pointing it at the repo root would publish
 
 ```bash
 curl https://<service>.onrender.com/health
+```
+
+Without a token this returns only `{"status":"ok"}`. For the details, send the admin token:
+
+```bash
+curl -H "X-Admin-Token: <token>" https://<service>.onrender.com/health
 ```
 
 Check in the response:

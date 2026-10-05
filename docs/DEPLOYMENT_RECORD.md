@@ -240,7 +240,7 @@ curl -s -X POST https://flux-api-vono.onrender.com/auth/login \
   -d '{"email":"nishanth@flux.app","password":"FluxDemo@123"}'
 ```
 
-`/health` should report `"provider": "openai"`, `"scheduler": {"running": true}`
+`/health` with `X-Admin-Token` should report `"provider": "openai"`, `"scheduler": {"running": true}`
 and non-zero ingestion rows.
 
 ---

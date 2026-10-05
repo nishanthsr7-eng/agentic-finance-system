@@ -53,6 +53,16 @@ def test_garch_short_series_fallback():
     assert len(cv) == len(s) and np.isfinite(cv.dropna()).all()
 
 
+def test_garch_sub_dollar_prices_are_prices():
+    from backend.prediction.garch import forecast_h_vol
+
+    # A coin trading around $0.30 with ~2% daily moves: the 5-day σ must be a few %, not ~price level.
+    rng = np.random.default_rng(2)
+    prices = pd.Series(0.3 * np.exp(np.cumsum(rng.normal(0, 0.02, 400))))
+    sigma = forecast_h_vol(prices, 5)
+    assert 0.02 < sigma < 0.1
+
+
 # ── Conformal (pure) ─────────────────────────────────────────────────────────────
 def test_conformal_quantile_finite_sample():
     from backend.prediction.conformal import conformal_quantile
