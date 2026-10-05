@@ -15,7 +15,7 @@ is visible — comparing raw accuracy across different samples (or against an up
 would be misleading. Edge-over-drift is the project's sanctioned cross-sample-comparable metric.
 
 Honest framing (Phase 9, GATE-9): on raw 5-day direction the universe drifts up, so always-up and
-even a cheap ARIMA look strong on RAW accuracy — that is the efficient-market ceiling (Workflow §6),
+even a cheap ARIMA look strong on RAW accuracy — that is the efficient-market ceiling,
 not skill. The thing FLUX-X has that NONE of these sign-forecasters do is calibrated **AUC ranking
 skill**, **selective precision** (meta-labeling), and a deployable **cross-sectional Sharpe**
 (GATE-7) — you cannot build the cross-sectional book out of a single ARIMA point forecast. So GATE-9

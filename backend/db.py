@@ -314,6 +314,8 @@ async def insert_prediction(row: dict) -> int:
             row,
         )
         await db.commit()
+        if cur.lastrowid is None:
+            raise RuntimeError("prediction insert returned no row id")
         return cur.lastrowid
 
 

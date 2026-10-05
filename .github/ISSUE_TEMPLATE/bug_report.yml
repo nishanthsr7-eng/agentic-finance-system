@@ -1,0 +1,21 @@
+name: Bug report
+description: Something on the site or in the API does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Page or endpoint
+      placeholder: e.g. pages/advisor.html or GET /predict/BTC-USD
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output or API response
+      render: text

@@ -1,5 +1,5 @@
 """
-FLUX-X capstone tests — live cross-sectional book construction (Workflow §4, step 8).
+FLUX-X capstone tests — live cross-sectional book construction (step 8 of the FLUX-X loop).
 
 Run directly:    python backend/prediction/tests/test_flux_x.py
 Or with pytest:  pytest backend/prediction/tests/test_flux_x.py -q

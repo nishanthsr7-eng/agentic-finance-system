@@ -69,6 +69,9 @@ Dataset/
 
 # Test / tooling caches
 .pytest_cache/
+.mypy_cache/
+test-results/
+playwright-report/
 
 # Stray pip-redirect files
 =*.*

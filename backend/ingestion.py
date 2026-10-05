@@ -602,7 +602,7 @@ def build_scheduler(insight_job_fn=None):
         max_instances=1,
     )
 
-    # 6) Prediction cycle daily at 00:30 UTC — the full FLUX-X §4 loop: resolve matured predictions
+    # 6) Prediction cycle daily at 00:30 UTC — the full FLUX-X loop: resolve matured predictions
     #    → log a fresh batch (steps 1–7) → construct the cross-sectional book (step 8) → red-team
     #    its top-k (step 9) → paper dry-run (step 10). Runs only if the trained model artifacts are
     #    present (skips cleanly otherwise).

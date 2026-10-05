@@ -3,6 +3,7 @@
 import asyncio
 import functools
 from datetime import date
+from typing import Any
 
 import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException
@@ -73,7 +74,7 @@ def _run_backtest_sync(
 
     capital = initial_capital
     shares = 0.0
-    trades = []
+    trades: list[dict[str, Any]] = []
     equity_curve = []
 
     for ts, row in df.iterrows():

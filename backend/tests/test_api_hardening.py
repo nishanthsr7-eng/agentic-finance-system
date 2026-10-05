@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from backend import llm, main, user_api
 from backend.auth import require_user
-from backend.routes import backtest
+from backend.routes import backtest, market
 
 client = TestClient(main.app)
 ORIGIN = "http://localhost:3000"
@@ -109,3 +109,16 @@ def test_health_public_is_minimal():
 
 def test_ingestion_status_needs_admin():
     assert client.get("/ingestion/status").status_code in (401, 403)
+
+
+def test_market_data_errors_hide_exception_text(monkeypatch):
+    def boom(*_a):
+        raise RuntimeError("internal path C:/secret/yf.py")
+
+    monkeypatch.setattr(market, "_fetch_candles_sync", boom)
+    monkeypatch.setattr(market, "_compute_indicators_sync", boom)
+    monkeypatch.setattr(market.cache, "get", lambda _k: None)
+    for path in ("/market/candles/btc?tf=1D", "/market/indicators/NVDA"):
+        r = client.get(path)
+        assert r.status_code == 502
+        assert "secret" not in r.text

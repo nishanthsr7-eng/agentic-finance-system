@@ -1,0 +1,77 @@
+# Local full stack in one command: MySQL, the API and the static frontend.
+#
+#   docker compose up --build
+#
+# Then open http://localhost:3000 and click "Use demo account".
+# API keys are optional: put any you have in .env (see .env.example) and they
+# are passed through. Without them the app runs, minus the features that need
+# them. Market ingestion is off here so a fresh stack starts quietly; set
+# INGESTION_ENABLED=true in .env to turn it on.
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: flux-local
+      MYSQL_DATABASE: flux
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pflux-local"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: builds the tables and the demo user's data, then exits.
+  seed:
+    build: .
+    command: python scripts/seed_mysql.py --no-market
+    env_file:
+      - path: .env
+        required: false
+    environment: &db-env
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: flux-local
+      MYSQL_DB: flux
+      MYSQL_SSL: "false"
+    volumes:
+      - ./scripts:/home/user/app/scripts:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *db-env
+      INGESTION_ENABLED: ${INGESTION_ENABLED:-false}
+      HEAVY_JOBS_ON_STARTUP: "false"
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+    ports:
+      - "8000:8080"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  # The frontend is static files; js/flux-config.js points localhost at :8000.
+  web:
+    image: nginx:1.27-alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./404.html:/usr/share/nginx/html/404.html:ro
+      - ./pages:/usr/share/nginx/html/pages:ro
+      - ./css:/usr/share/nginx/html/css:ro
+      - ./js:/usr/share/nginx/html/js:ro
+      - ./assets:/usr/share/nginx/html/assets:ro
+    depends_on:
+      - api
+
+volumes:
+  mysql-data:

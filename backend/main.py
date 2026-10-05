@@ -139,7 +139,7 @@ async def health(x_admin_token: str | None = Header(default=None)):
         return {"status": "ok"}
     from .ingestion import get_status as ingestion_status
 
-    sched_jobs = []
+    sched_jobs: list[dict] = []
     if common.scheduler and common.scheduler.running:
         sched_jobs = [
             {

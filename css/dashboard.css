@@ -89,7 +89,7 @@
   outline: none;
 }
 
-/* ── §9.2 Daily Briefing Card ── */
+/* ── Daily Briefing Card ── */
 .briefing-card.loading {
   opacity: 0.55;
   pointer-events: none;
@@ -226,7 +226,7 @@
 .briefing-port-chg.up   { color: #00e5a0; }
 .briefing-port-chg.down { color: #ff4d4d; }
 
-/* ── §9.3 Investment Proposal Card (inside advisor bubbles) ── */
+/* ── Investment Proposal Card (inside advisor bubbles) ── */
 .proposal-card {
   max-width: 78%;
   border: 1px solid rgba(0,229,160,.25);

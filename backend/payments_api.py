@@ -148,6 +148,8 @@ def create_transaction(body: TxnRequest, user_id: int = Depends(require_user)) -
             raise
 
     row = M.query_one("SELECT * FROM transactions WHERE id=%s", (tx_id,))
+    if row is None:
+        raise HTTPException(500, "Transaction could not be saved")
     new_bal = None
     if acct:
         refreshed = M.query_one("SELECT balance FROM accounts WHERE id=%s", (acct["id"],))

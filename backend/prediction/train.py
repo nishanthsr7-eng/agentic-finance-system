@@ -45,7 +45,7 @@ MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 # Symbols to pool. Exclude USDT (stablecoin → no trend), macro series, and thin symbols.
-# NIFTY: removed from the product (step 8a), but old local DBs still hold its history.
+# NIFTY: removed from the product, but old local DBs still hold its history.
 EXCLUDE = {"USDT", "SPX", "VIX", "TNX", "NIFTY"}
 MIN_EVENTS = 800
 

@@ -74,7 +74,10 @@ def _ensure_wallet(user_id: int) -> dict:
             "INSERT INTO trading_wallet (user_id, cash_usd, seeded_usd) VALUES (%s, %s, %s)",
             (user_id, SEED_CASH_USD, SEED_CASH_USD),
         )
-    return M.query_one("SELECT * FROM trading_wallet WHERE user_id=%s", (user_id,))
+    row = M.query_one("SELECT * FROM trading_wallet WHERE user_id=%s", (user_id,))
+    if row is None:
+        raise RuntimeError(f"wallet for user {user_id} missing after insert")
+    return row
 
 
 def _live_price(symbol: str) -> float | None:

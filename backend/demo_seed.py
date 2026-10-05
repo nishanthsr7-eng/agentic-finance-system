@@ -624,7 +624,7 @@ def load_closes(start: date, end: date) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     syms = list(TRADE_SYMBOLS)
     lo, hi = (start - timedelta(days=7)).isoformat(), end.isoformat()
-    tables = ("ohlcv_history", "ohlcv_daily")
+    tables: tuple[str, ...] = ("ohlcv_history", "ohlcv_daily")
     if _mysql_store():  # history lives in TiDB
         tables = ("ohlcv_daily",)
         try:
